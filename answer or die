@@ -1,0 +1,1878 @@
+local ZenthraUI = (function()
+-- ZenthraUI
+-- A reusable, dependency-free Roblox UI library inspired by the supplied references.
+-- Place this ModuleScript in ReplicatedStorage and require it from a LocalScript.
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local ZenthraUI = {}
+ZenthraUI.__index = ZenthraUI
+
+local THEME = {
+	Background = Color3.fromRGB(7, 7, 8),
+	Sidebar = Color3.fromRGB(8, 8, 9),
+	Surface = Color3.fromRGB(15, 15, 17),
+	SurfaceRaised = Color3.fromRGB(22, 22, 24),
+	SurfaceHover = Color3.fromRGB(30, 30, 33),
+	Input = Color3.fromRGB(47, 47, 50),
+	Border = Color3.fromRGB(55, 55, 60),
+	BorderSoft = Color3.fromRGB(34, 34, 38),
+	Text = Color3.fromRGB(238, 238, 241),
+	Muted = Color3.fromRGB(126, 126, 134),
+	Dim = Color3.fromRGB(82, 82, 90),
+	White = Color3.fromRGB(244, 244, 247),
+	AccentA = Color3.fromRGB(129, 83, 255),
+	AccentB = Color3.fromRGB(61, 143, 255),
+	Danger = Color3.fromRGB(232, 91, 105),
+}
+
+local function create(className, properties)
+	local object = Instance.new(className)
+	for property, value in pairs(properties or {}) do
+		if property ~= "Parent" then
+			object[property] = value
+		end
+	end
+	if properties and properties.Parent then
+		object.Parent = properties.Parent
+	end
+	return object
+end
+
+local function addCorner(parent, radius)
+	return create("UICorner", {
+		CornerRadius = UDim.new(0, radius or 6),
+		Parent = parent,
+	})
+end
+
+local function addStroke(parent, color, thickness, transparency)
+	return create("UIStroke", {
+		Color = color or THEME.Border,
+		Thickness = thickness or 1,
+		Transparency = transparency or 0,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Parent = parent,
+	})
+end
+
+local function addPadding(parent, left, right, top, bottom)
+	return create("UIPadding", {
+		PaddingLeft = UDim.new(0, left or 0),
+		PaddingRight = UDim.new(0, right or left or 0),
+		PaddingTop = UDim.new(0, top or left or 0),
+		PaddingBottom = UDim.new(0, bottom or top or left or 0),
+		Parent = parent,
+	})
+end
+
+local function tween(object, duration, properties, style, direction)
+	local info = TweenInfo.new(
+		duration or 0.16,
+		style or Enum.EasingStyle.Quint,
+		direction or Enum.EasingDirection.Out
+	)
+	local animation = TweenService:Create(object, info, properties)
+	animation:Play()
+	return animation
+end
+
+local function safeCall(callback, ...)
+	if type(callback) ~= "function" then
+		return
+	end
+	local ok, message = pcall(callback, ...)
+	if not ok then
+		warn("[ZenthraUI callback] " .. tostring(message))
+	end
+end
+
+local function clamp(value, minimum, maximum)
+	return math.max(minimum, math.min(maximum, value))
+end
+
+local function round(value, decimals)
+	local power = 10 ^ (decimals or 0)
+	return math.floor(value * power + 0.5) / power
+end
+
+local function keyName(keyCode)
+	local name = keyCode.Name
+	local aliases = {
+		LeftShift = "LShift",
+		RightShift = "RShift",
+		LeftControl = "LCtrl",
+		RightControl = "RCtrl",
+		LeftAlt = "LAlt",
+		RightAlt = "RAlt",
+		MouseButton1 = "M1",
+		MouseButton2 = "M2",
+		MouseButton3 = "M3",
+	}
+	return aliases[name] or name
+end
+
+local function focusMark(parent, size, color)
+	local holder = create("Frame", {
+		Name = "FocusMark",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(size, size),
+		Parent = parent,
+	})
+
+	local line = math.max(3, math.floor(size * 0.3))
+	local thickness = 1
+	local marks = {
+		{ UDim2.fromOffset(line, thickness), UDim2.fromOffset(0, 0) },
+		{ UDim2.fromOffset(thickness, line), UDim2.fromOffset(0, 0) },
+		{ UDim2.fromOffset(line, thickness), UDim2.new(1, -line, 0, 0) },
+		{ UDim2.fromOffset(thickness, line), UDim2.new(1, -thickness, 0, 0) },
+		{ UDim2.fromOffset(line, thickness), UDim2.new(0, 0, 1, -thickness) },
+		{ UDim2.fromOffset(thickness, line), UDim2.new(0, 0, 1, -line) },
+		{ UDim2.fromOffset(line, thickness), UDim2.new(1, -line, 1, -thickness) },
+		{ UDim2.fromOffset(thickness, line), UDim2.new(1, -thickness, 1, -line) },
+	}
+
+	for _, mark in ipairs(marks) do
+		create("Frame", {
+			BorderSizePixel = 0,
+			BackgroundColor3 = color or THEME.Muted,
+			Size = mark[1],
+			Position = mark[2],
+			Parent = holder,
+		})
+	end
+
+	return holder
+end
+
+local function addHover(button, normalColor, hoverColor)
+	button.MouseEnter:Connect(function()
+		tween(button, 0.14, { BackgroundColor3 = hoverColor })
+	end)
+	button.MouseLeave:Connect(function()
+		tween(button, 0.14, { BackgroundColor3 = normalColor })
+	end)
+end
+
+local function resolveParent()
+	local player = Players.LocalPlayer
+	if not player then
+		error("ZenthraUI must be required from a LocalScript")
+	end
+	return player:WaitForChild("PlayerGui")
+end
+
+local function setFlag(window, flag, value)
+	if flag then
+		window.Flags[flag] = value
+	end
+end
+
+local function makeDraggable(window, handle, target)
+	local dragging = false
+	local dragInput = nil
+	local dragStart = nil
+	local startPosition = nil
+
+	window:_Connect(handle.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPosition = target.Position
+
+			local endedConnection
+			endedConnection = input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+					if endedConnection then
+						endedConnection:Disconnect()
+					end
+				end
+			end)
+		end
+	end)
+
+	window:_Connect(handle.InputChanged, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+
+	window:_Connect(UserInputService.InputChanged, function(input)
+		if dragging and input == dragInput and dragStart and startPosition then
+			local delta = input.Position - dragStart
+			target.Position = UDim2.new(
+				startPosition.X.Scale,
+				startPosition.X.Offset + delta.X,
+				startPosition.Y.Scale,
+				startPosition.Y.Offset + delta.Y
+			)
+		end
+	end)
+end
+
+function ZenthraUI:_Connect(signal, callback)
+	local connection = signal:Connect(callback)
+	table.insert(self.Connections, connection)
+	return connection
+end
+
+function ZenthraUI.CreateWindow(options)
+	options = options or {}
+	local self = setmetatable({}, ZenthraUI)
+	self.Title = options.Title or "Zenthra"
+	self.ToggleKey = options.ToggleKey or Enum.KeyCode.RightShift
+	self.Size = options.Size or Vector2.new(750, 475)
+	self.Flags = {}
+	self.Tabs = {}
+	self.Connections = {}
+	self.SelectedTab = nil
+	self.Visible = true
+	self.Destroyed = false
+
+	local screen = create("ScreenGui", {
+		Name = options.GuiName or "ZenthraUI",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		DisplayOrder = options.DisplayOrder or 90,
+		Parent = options.Parent or resolveParent(),
+	})
+	self.ScreenGui = screen
+
+	local dim = create("Frame", {
+		Name = "Dim",
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 1),
+		Visible = options.DimBackground == true,
+		Parent = screen,
+	})
+	self.Dim = dim
+
+	local root = create("Frame", {
+		Name = "Window",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(self.Size.X, self.Size.Y),
+		BackgroundColor3 = THEME.Background,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Parent = screen,
+	})
+	addCorner(root, 10)
+	local outerStroke = addStroke(root, THEME.Border, 1, 0.18)
+	local outlineGradient = create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, THEME.AccentA),
+			ColorSequenceKeypoint.new(0.28, THEME.Border),
+			ColorSequenceKeypoint.new(0.75, THEME.Border),
+			ColorSequenceKeypoint.new(1, THEME.AccentB),
+		}),
+		Rotation = 90,
+		Parent = outerStroke,
+	})
+	self.Root = root
+	self.OutlineGradient = outlineGradient
+
+	local scale = create("UIScale", { Scale = 1, Parent = root })
+	self.UIScale = scale
+
+	local topbar = create("Frame", {
+		Name = "Topbar",
+		BackgroundColor3 = Color3.fromRGB(36, 36, 39),
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 42),
+		Active = true,
+		Parent = root,
+	})
+	create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(65, 65, 68)),
+			ColorSequenceKeypoint.new(0.35, Color3.fromRGB(43, 43, 46)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 12, 13)),
+		}),
+		Rotation = 90,
+		Parent = topbar,
+	})
+	create("Frame", {
+		Name = "Highlight",
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundTransparency = 0.82,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(9, 0),
+		Size = UDim2.new(1, -18, 0, 1),
+		Parent = topbar,
+	})
+
+	local brand = create("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(19, 12),
+		Size = UDim2.fromOffset(130, 20),
+		Parent = topbar,
+	})
+	local brandMark = focusMark(brand, 15, THEME.Text)
+	brandMark.Position = UDim2.fromOffset(0, 2)
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(23, 0),
+		Size = UDim2.new(1, -23, 1, 0),
+		Font = Enum.Font.GothamBold,
+		Text = self.Title,
+		TextColor3 = THEME.Text,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = brand,
+	})
+
+	local searchButton = create("TextButton", {
+		Name = "SearchButton",
+		AutoButtonColor = false,
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, -43, 0, 7),
+		Size = UDim2.fromOffset(30, 28),
+		Font = Enum.Font.GothamMedium,
+		Text = "⌕",
+		TextColor3 = THEME.Muted,
+		TextSize = 24,
+		Parent = topbar,
+	})
+
+	local searchBox = create("TextBox", {
+		Name = "Search",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -47, 0.5, 0),
+		Size = UDim2.fromOffset(0, 27),
+		BackgroundColor3 = Color3.fromRGB(16, 16, 18),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham,
+		PlaceholderText = "Search tabs...",
+		PlaceholderColor3 = THEME.Dim,
+		Text = "",
+		TextColor3 = THEME.Text,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTransparency = 1,
+		Visible = false,
+		Parent = topbar,
+	})
+	addCorner(searchBox, 6)
+	addStroke(searchBox, THEME.BorderSoft, 1, 0.2)
+	addPadding(searchBox, 9, 9, 0, 0)
+	self.SearchBox = searchBox
+
+	local sidebar = create("Frame", {
+		Name = "Sidebar",
+		BackgroundColor3 = THEME.Sidebar,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 42),
+		Size = UDim2.new(0, 153, 1, -42),
+		Parent = root,
+	})
+	create("Frame", {
+		BackgroundColor3 = THEME.BorderSoft,
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1, -1, 0, 20),
+		Size = UDim2.new(0, 1, 1, -38),
+		Parent = sidebar,
+	})
+
+	local navigation = create("ScrollingFrame", {
+		Name = "Navigation",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(11, 18),
+		Size = UDim2.new(1, -21, 1, -28),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 0,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Parent = sidebar,
+	})
+	create("UIListLayout", {
+		Padding = UDim.new(0, 4),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = navigation,
+	})
+	self.Navigation = navigation
+
+	local content = create("Frame", {
+		Name = "Content",
+		BackgroundColor3 = THEME.Background,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(153, 42),
+		Size = UDim2.new(1, -153, 1, -42),
+		ClipsDescendants = true,
+		Parent = root,
+	})
+	self.Content = content
+
+	local empty = create("TextLabel", {
+		Name = "Empty",
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(280, 42),
+		Font = Enum.Font.Gotham,
+		Text = "Create a tab to begin",
+		TextColor3 = THEME.Dim,
+		TextSize = 12,
+		Parent = content,
+	})
+	self.EmptyLabel = empty
+
+	local toastHolder = create("Frame", {
+		Name = "Notifications",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -14, 1, -14),
+		Size = UDim2.fromOffset(265, 300),
+		BackgroundTransparency = 1,
+		Parent = screen,
+	})
+	create("UIListLayout", {
+		Padding = UDim.new(0, 8),
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Bottom,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = toastHolder,
+	})
+	self.ToastHolder = toastHolder
+
+	local mini = create("TextButton", {
+		Name = "MiniPill",
+		AutoButtonColor = false,
+		BackgroundColor3 = Color3.fromRGB(26, 26, 29),
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(8, 8),
+		Size = UDim2.fromOffset(76, 27),
+		Text = "",
+		Visible = false,
+		Active = true,
+		Parent = screen,
+	})
+	addCorner(mini, 7)
+	local miniStroke = addStroke(mini, THEME.Border, 1, 0.1)
+	create("UIGradient", {
+		Color = ColorSequence.new(THEME.AccentA, THEME.AccentB),
+		Rotation = 90,
+		Parent = miniStroke,
+	})
+	create("UIGradient", {
+		Color = ColorSequence.new(Color3.fromRGB(49, 49, 52), Color3.fromRGB(12, 12, 14)),
+		Rotation = 90,
+		Parent = mini,
+	})
+	local miniMark = focusMark(mini, 11, THEME.Muted)
+	miniMark.Position = UDim2.fromOffset(8, 8)
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(25, 0),
+		Size = UDim2.new(1, -29, 1, 0),
+		Font = Enum.Font.GothamMedium,
+		Text = self.Title,
+		TextColor3 = THEME.Text,
+		TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = mini,
+	})
+	self.MiniPill = mini
+
+	makeDraggable(self, topbar, root)
+	makeDraggable(self, mini, mini)
+
+	local searchOpen = false
+	self:_Connect(searchButton.MouseButton1Click, function()
+		searchOpen = not searchOpen
+		if searchOpen then
+			searchBox.Visible = true
+			tween(searchBox, 0.2, {
+				Size = UDim2.fromOffset(170, 27),
+				BackgroundTransparency = 0,
+				TextTransparency = 0,
+			})
+			task.delay(0.08, function()
+				if searchBox.Parent then
+					searchBox:CaptureFocus()
+				end
+			end)
+		else
+			searchBox.Text = ""
+			searchBox:ReleaseFocus()
+			tween(searchBox, 0.16, {
+				Size = UDim2.fromOffset(0, 27),
+				BackgroundTransparency = 1,
+				TextTransparency = 1,
+			})
+			task.delay(0.17, function()
+				if searchBox.Parent and not searchOpen then
+					searchBox.Visible = false
+				end
+			end)
+		end
+	end)
+
+	self:_Connect(searchBox:GetPropertyChangedSignal("Text"), function()
+		local query = string.lower(searchBox.Text)
+		for _, tab in ipairs(self.Tabs) do
+			tab.Button.Visible = query == "" or string.find(string.lower(tab.Name), query, 1, true) ~= nil
+		end
+	end)
+
+	self:_Connect(mini.MouseButton1Click, function()
+		self:SetVisible(true)
+	end)
+
+	self:_Connect(UserInputService.InputBegan, function(input, gameProcessed)
+		if not gameProcessed and input.KeyCode == self.ToggleKey then
+			self:SetVisible(not self.Visible)
+		end
+	end)
+
+	local function updateScale()
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return
+		end
+		local viewport = camera.ViewportSize
+		local fitX = (viewport.X - 24) / self.Size.X
+		local fitY = (viewport.Y - 24) / self.Size.Y
+		scale.Scale = clamp(math.min(fitX, fitY, 1), 0.38, 1)
+	end
+
+	updateScale()
+	if workspace.CurrentCamera then
+		self:_Connect(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"), updateScale)
+	end
+	self:_Connect(workspace:GetPropertyChangedSignal("CurrentCamera"), function()
+		updateScale()
+	end)
+
+	return self
+end
+
+function ZenthraUI:SetVisible(visible)
+	if self.Destroyed then
+		return
+	end
+	self.Visible = visible == true
+	if self.Visible then
+		self.Root.Visible = true
+		self.MiniPill.Visible = false
+		self.Root.Size = UDim2.fromOffset(self.Size.X - 18, self.Size.Y - 12)
+		self.Root.BackgroundTransparency = 0.12
+		tween(self.Root, 0.2, {
+			Size = UDim2.fromOffset(self.Size.X, self.Size.Y),
+			BackgroundTransparency = 0,
+		})
+	else
+		tween(self.Root, 0.16, {
+			Size = UDim2.fromOffset(self.Size.X - 18, self.Size.Y - 12),
+			BackgroundTransparency = 0.12,
+		})
+		task.delay(0.16, function()
+			if self.Root.Parent and not self.Visible then
+				self.Root.Visible = false
+				self.MiniPill.Visible = true
+			end
+		end)
+	end
+end
+
+function ZenthraUI:Toggle()
+	self:SetVisible(not self.Visible)
+end
+
+function ZenthraUI:Notify(options)
+	if self.Destroyed then
+		return
+	end
+	if type(options) == "string" then
+		options = { Title = self.Title, Content = options }
+	end
+	options = options or {}
+
+	local toast = create("Frame", {
+		Name = "Toast",
+		BackgroundColor3 = THEME.Surface,
+		BackgroundTransparency = 0.04,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(0, 72),
+		ClipsDescendants = true,
+		Parent = self.ToastHolder,
+	})
+	addCorner(toast, 8)
+	addStroke(toast, THEME.Border, 1, 0.15)
+	create("Frame", {
+		BackgroundColor3 = options.Color or THEME.White,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 8),
+		Size = UDim2.new(0, 2, 1, -16),
+		Parent = toast,
+	})
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(15, 11),
+		Size = UDim2.new(1, -28, 0, 17),
+		Font = Enum.Font.GothamBold,
+		Text = options.Title or self.Title,
+		TextColor3 = THEME.Text,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = toast,
+	})
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(15, 31),
+		Size = UDim2.new(1, -28, 0, 29),
+		Font = Enum.Font.Gotham,
+		Text = options.Content or "Notification",
+		TextColor3 = THEME.Muted,
+		TextSize = 10,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Parent = toast,
+	})
+
+	tween(toast, 0.22, { Size = UDim2.fromOffset(250, 72) })
+	task.delay(options.Duration or 3.2, function()
+		if toast.Parent then
+			tween(toast, 0.18, { Size = UDim2.fromOffset(0, 72), BackgroundTransparency = 1 })
+			task.delay(0.2, function()
+				if toast.Parent then
+					toast:Destroy()
+				end
+			end)
+		end
+	end)
+end
+
+function ZenthraUI:CreateTab(options)
+	if type(options) == "string" then
+		options = { Name = options }
+	end
+	options = options or {}
+	local window = self
+	local tab = {
+		Window = window,
+		Name = options.Name or "Tab",
+		Icon = options.Icon or "◇",
+		Sections = {},
+		LeftCount = 0,
+		RightCount = 0,
+	}
+
+	local button = create("TextButton", {
+		Name = tab.Name,
+		AutoButtonColor = false,
+		BackgroundColor3 = THEME.Sidebar,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 37),
+		Font = Enum.Font.GothamMedium,
+		Text = "",
+		Parent = window.Navigation,
+	})
+	addCorner(button, 5)
+	local activeBar = create("Frame", {
+		Name = "Active",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 3, 0.5, 0),
+		Size = UDim2.fromOffset(3, 0),
+		BackgroundColor3 = THEME.White,
+		BorderSizePixel = 0,
+		Parent = button,
+	})
+	addCorner(activeBar, 2)
+	local icon = create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(13, 0),
+		Size = UDim2.fromOffset(18, 37),
+		Font = Enum.Font.GothamMedium,
+		Text = tab.Icon,
+		TextColor3 = THEME.Dim,
+		TextSize = 14,
+		Parent = button,
+	})
+	local label = create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(35, 0),
+		Size = UDim2.new(1, -39, 1, 0),
+		Font = Enum.Font.GothamMedium,
+		Text = tab.Name,
+		TextColor3 = THEME.Dim,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = button,
+	})
+
+	local page = create("Frame", {
+		Name = tab.Name .. "Page",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(20, 25),
+		Size = UDim2.new(1, -36, 1, -43),
+		Visible = false,
+		Parent = window.Content,
+	})
+
+	local left = create("ScrollingFrame", {
+		Name = "Left",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0.5, -8, 1, 0),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Color3.fromRGB(162, 162, 168),
+		ScrollBarImageTransparency = 0.28,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Parent = page,
+	})
+	local leftLayout = create("UIListLayout", {
+		Padding = UDim.new(0, 10),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = left,
+	})
+	addPadding(left, 0, 7, 0, 7)
+
+	local right = create("ScrollingFrame", {
+		Name = "Right",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0.5, 8, 0, 0),
+		Size = UDim2.new(0.5, -8, 1, 0),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Color3.fromRGB(162, 162, 168),
+		ScrollBarImageTransparency = 0.28,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Parent = page,
+	})
+	local rightLayout = create("UIListLayout", {
+		Padding = UDim.new(0, 10),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = right,
+	})
+	addPadding(right, 0, 7, 0, 7)
+
+	tab.Button = button
+	tab.ActiveBar = activeBar
+	tab.Label = label
+	tab.IconLabel = icon
+	tab.Page = page
+	tab.Left = left
+	tab.Right = right
+	tab.LeftLayout = leftLayout
+	tab.RightLayout = rightLayout
+
+	function tab:Select()
+		for _, other in ipairs(window.Tabs) do
+			local selected = other == self
+			other.Page.Visible = selected
+			tween(other.Label, 0.14, { TextColor3 = selected and THEME.Text or THEME.Dim })
+			tween(other.IconLabel, 0.14, { TextColor3 = selected and THEME.Text or THEME.Dim })
+			tween(other.Button, 0.14, {
+				BackgroundTransparency = selected and 0.45 or 1,
+				BackgroundColor3 = selected and THEME.Surface or THEME.Sidebar,
+			})
+			tween(other.ActiveBar, 0.16, { Size = UDim2.fromOffset(3, selected and 23 or 0) })
+		end
+		window.SelectedTab = self
+	end
+
+	window:_Connect(button.MouseButton1Click, function()
+		tab:Select()
+	end)
+	button.MouseEnter:Connect(function()
+		if window.SelectedTab ~= tab then
+			tween(button, 0.12, { BackgroundTransparency = 0.7, BackgroundColor3 = THEME.Surface })
+		end
+	end)
+	button.MouseLeave:Connect(function()
+		if window.SelectedTab ~= tab then
+			tween(button, 0.12, { BackgroundTransparency = 1, BackgroundColor3 = THEME.Sidebar })
+		end
+	end)
+
+	setmetatable(tab, { __index = ZenthraUI.Tab })
+	table.insert(window.Tabs, tab)
+	window.EmptyLabel.Visible = false
+	if #window.Tabs == 1 then
+		tab:Select()
+	end
+
+	return tab
+end
+
+ZenthraUI.Tab = {}
+
+local function createSectionHeader(section, options)
+	local title = create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 10),
+		Size = UDim2.new(1, -42, 0, 17),
+		Font = Enum.Font.GothamBold,
+		Text = options.Title or "Section",
+		TextColor3 = THEME.Text,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = section.Frame,
+	})
+
+	local description = create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 27),
+		Size = UDim2.new(1, -42, 0, 15),
+		Font = Enum.Font.Gotham,
+		Text = options.Description or "",
+		TextColor3 = THEME.Muted,
+		TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Visible = options.Description ~= nil and options.Description ~= "",
+		Parent = section.Frame,
+	})
+
+	if options.Locked then
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Position = UDim2.new(1, -31, 0, 10),
+			Size = UDim2.fromOffset(19, 18),
+			Font = Enum.Font.GothamBold,
+			Text = "▢",
+			TextColor3 = THEME.Dim,
+			TextSize = 14,
+			Parent = section.Frame,
+		})
+	end
+
+	local headerHeight = description.Visible and 52 or 40
+	create("Frame", {
+		BackgroundColor3 = THEME.BorderSoft,
+		BackgroundTransparency = 0.1,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, headerHeight - 1),
+		Size = UDim2.new(1, 0, 0, 1),
+		Parent = section.Frame,
+	})
+
+	local body = create("Frame", {
+		Name = "Body",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, headerHeight),
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Parent = section.Frame,
+	})
+	create("UIListLayout", {
+		Padding = UDim.new(0, 0),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = body,
+	})
+	section.Body = body
+	section.TitleLabel = title
+	section.DescriptionLabel = description
+end
+
+function ZenthraUI.Tab:CreateSection(options)
+	if type(options) == "string" then
+		options = { Title = options }
+	end
+	options = options or {}
+
+	local side = options.Side
+	if side ~= "Left" and side ~= "Right" then
+		side = self.LeftCount <= self.RightCount and "Left" or "Right"
+	end
+	local parent = side == "Right" and self.Right or self.Left
+
+	local frame = create("Frame", {
+		Name = options.Title or "Section",
+		BackgroundColor3 = THEME.Surface,
+		BackgroundTransparency = 0.12,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		ClipsDescendants = false,
+		Parent = parent,
+	})
+	addCorner(frame, 7)
+	addStroke(frame, THEME.Border, 1, 0.12)
+
+	local section = {
+		Tab = self,
+		Window = self.Window,
+		Frame = frame,
+		Body = nil,
+		Controls = {},
+	}
+	setmetatable(section, { __index = ZenthraUI.Section })
+	createSectionHeader(section, options)
+
+	if side == "Left" then
+		self.LeftCount = self.LeftCount + 1
+	else
+		self.RightCount = self.RightCount + 1
+	end
+	table.insert(self.Sections, section)
+	return section
+end
+
+ZenthraUI.Tab.AddSection = ZenthraUI.Tab.CreateSection
+ZenthraUI.Section = {}
+
+local function makeControlRow(section, height, withDivider)
+	local row = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, height),
+		Parent = section.Body,
+	})
+	if withDivider ~= false then
+		create("Frame", {
+			BackgroundColor3 = THEME.BorderSoft,
+			BackgroundTransparency = 0.24,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0, 10, 1, -1),
+			Size = UDim2.new(1, -20, 0, 1),
+			Parent = row,
+		})
+	end
+	return row
+end
+
+local function makeNameLabel(row, name, position, size)
+	return create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = position or UDim2.fromOffset(11, 0),
+		Size = size or UDim2.new(1, -70, 1, 0),
+		Font = Enum.Font.GothamMedium,
+		Text = name or "Control",
+		TextColor3 = THEME.Text,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = row,
+	})
+end
+
+function ZenthraUI.Section:AddToggle(options)
+	if type(options) == "string" then
+		options = { Name = options }
+	end
+	options = options or {}
+	local section = self
+	local window = self.Window
+	local state = options.Default == true
+	local keybind = options.Keybind
+	local row = makeControlRow(section, 37)
+
+	local leftOffset = 11
+	if options.Tag then
+		local tag = create("TextLabel", {
+			BackgroundColor3 = THEME.Input,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(11, 10),
+			Size = UDim2.fromOffset(28, 17),
+			Font = Enum.Font.GothamMedium,
+			Text = tostring(options.Tag),
+			TextColor3 = THEME.Text,
+			TextSize = 9,
+			Parent = row,
+		})
+		addCorner(tag, 4)
+		leftOffset = 45
+	end
+	local label = makeNameLabel(row, options.Name or "Toggle", UDim2.fromOffset(leftOffset, 0), UDim2.new(1, -112, 1, 0))
+
+	local switch = create("TextButton", {
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(27, 15),
+		BackgroundColor3 = state and THEME.White or Color3.fromRGB(45, 45, 49),
+		BorderSizePixel = 0,
+		Text = "",
+		Parent = row,
+	})
+	addCorner(switch, 8)
+	addStroke(switch, state and THEME.White or THEME.Border, 1, 0.05)
+	local knob = create("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = state and UDim2.new(1, -13, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+		Size = UDim2.fromOffset(11, 11),
+		BackgroundColor3 = state and Color3.fromRGB(45, 45, 49) or THEME.Muted,
+		BorderSizePixel = 0,
+		Parent = switch,
+	})
+	addCorner(knob, 6)
+
+	local keyChip = nil
+	if keybind then
+		keyChip = create("TextButton", {
+			AutoButtonColor = false,
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -47, 0.5, 0),
+			Size = UDim2.fromOffset(27, 17),
+			BackgroundColor3 = THEME.Input,
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamMedium,
+			Text = keyName(keybind),
+			TextColor3 = THEME.Text,
+			TextSize = 9,
+			Parent = row,
+		})
+		addCorner(keyChip, 4)
+	end
+
+	local control = {}
+	function control:Set(value, silent)
+		state = value == true
+		setFlag(window, options.Flag, state)
+		tween(switch, 0.16, { BackgroundColor3 = state and THEME.White or Color3.fromRGB(45, 45, 49) })
+		tween(knob, 0.16, {
+			Position = state and UDim2.new(1, -13, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+			BackgroundColor3 = state and Color3.fromRGB(45, 45, 49) or THEME.Muted,
+		})
+		if not silent then
+			safeCall(options.Callback, state)
+		end
+	end
+	function control:Get()
+		return state
+	end
+
+	window:_Connect(switch.MouseButton1Click, function()
+		control:Set(not state)
+	end)
+	if keyChip then
+		local listening = false
+		window:_Connect(keyChip.MouseButton1Click, function()
+			listening = true
+			keyChip.Text = "..."
+		end)
+		window:_Connect(UserInputService.InputBegan, function(input, gameProcessed)
+			if listening and input.KeyCode ~= Enum.KeyCode.Unknown then
+				listening = false
+				keybind = input.KeyCode
+				keyChip.Text = keyName(keybind)
+				safeCall(options.KeyChanged, keybind)
+				return
+			end
+			if not gameProcessed and not UserInputService:GetFocusedTextBox() and input.KeyCode == keybind then
+				control:Set(not state)
+			end
+		end)
+	end
+
+	control:Set(state, true)
+	control.Instance = row
+	control.Label = label
+	table.insert(section.Controls, control)
+	return control
+end
+
+function ZenthraUI.Section:AddSlider(options)
+	options = options or {}
+	local section = self
+	local window = self.Window
+	local minimum = options.Min or 0
+	local maximum = options.Max or 100
+	local decimals = options.Decimals or 0
+	local value = clamp(options.Default or minimum, minimum, maximum)
+	local row = makeControlRow(section, 51)
+	makeNameLabel(row, options.Name or "Slider", UDim2.fromOffset(11, 4), UDim2.new(1, -70, 0, 20))
+
+	local valueLabel = create("TextLabel", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -11, 0, 4),
+		Size = UDim2.fromOffset(62, 20),
+		Font = Enum.Font.GothamMedium,
+		Text = tostring(value),
+		TextColor3 = THEME.Text,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Parent = row,
+	})
+
+	local track = create("TextButton", {
+		AutoButtonColor = false,
+		BackgroundColor3 = Color3.fromRGB(54, 54, 58),
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(11, 31),
+		Size = UDim2.new(1, -22, 0, 3),
+		Text = "",
+		Parent = row,
+	})
+	addCorner(track, 2)
+	local fill = create("Frame", {
+		BackgroundColor3 = THEME.White,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0, 0, 1, 0),
+		Parent = track,
+	})
+	addCorner(fill, 2)
+	local thumb = create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0, 0.5),
+		Size = UDim2.fromOffset(8, 8),
+		BackgroundColor3 = THEME.White,
+		BorderSizePixel = 0,
+		Parent = track,
+	})
+	addCorner(thumb, 5)
+
+	local control = {}
+	function control:Set(newValue, silent)
+		value = round(clamp(tonumber(newValue) or minimum, minimum, maximum), decimals)
+		local alpha = maximum == minimum and 0 or (value - minimum) / (maximum - minimum)
+		fill.Size = UDim2.new(alpha, 0, 1, 0)
+		thumb.Position = UDim2.new(alpha, 0, 0.5, 0)
+		valueLabel.Text = (options.Prefix or "") .. tostring(value) .. (options.Suffix or "")
+		setFlag(window, options.Flag, value)
+		if not silent then
+			safeCall(options.Callback, value)
+		end
+	end
+	function control:Get()
+		return value
+	end
+
+	local dragging = false
+	local function updateFromInput(input)
+		local alpha = clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+		control:Set(minimum + (maximum - minimum) * alpha)
+	end
+	window:_Connect(track.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			updateFromInput(input)
+		end
+	end)
+	window:_Connect(UserInputService.InputChanged, function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			updateFromInput(input)
+		end
+	end)
+	window:_Connect(UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+
+	control:Set(value, true)
+	control.Instance = row
+	table.insert(section.Controls, control)
+	return control
+end
+
+function ZenthraUI.Section:AddDropdown(options)
+	options = options or {}
+	local section = self
+	local window = self.Window
+	local values = options.Values or {}
+	local selected = options.Default or values[1]
+	local open = false
+
+	local row = makeControlRow(section, 68)
+	makeNameLabel(row, options.Name or "Dropdown", UDim2.fromOffset(11, 2), UDim2.new(1, -22, 0, 21))
+
+	local dropdown = create("Frame", {
+		BackgroundColor3 = THEME.Input,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(10, 27),
+		Size = UDim2.new(1, -20, 0, 31),
+		ClipsDescendants = true,
+		ZIndex = 4,
+		Parent = row,
+	})
+	addCorner(dropdown, 5)
+	addStroke(dropdown, THEME.Border, 1, 0.15)
+	local selectButton = create("TextButton", {
+		AutoButtonColor = false,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 31),
+		Font = Enum.Font.GothamMedium,
+		Text = "",
+		ZIndex = 5,
+		Parent = dropdown,
+	})
+	local selectedLabel = create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(9, 0),
+		Size = UDim2.new(1, -34, 0, 31),
+		Font = Enum.Font.GothamMedium,
+		Text = tostring(selected or "Select"),
+		TextColor3 = THEME.Text,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 6,
+		Parent = dropdown,
+	})
+	local arrow = create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, -28, 0, 0),
+		Size = UDim2.fromOffset(20, 31),
+		Font = Enum.Font.GothamBold,
+		Text = "⌄",
+		TextColor3 = THEME.Muted,
+		TextSize = 13,
+		ZIndex = 6,
+		Parent = dropdown,
+	})
+
+	local search = create("TextBox", {
+		BackgroundColor3 = Color3.fromRGB(24, 24, 27),
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 31),
+		Size = UDim2.new(1, 0, 0, 28),
+		ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham,
+		PlaceholderText = "⌕  Search...",
+		PlaceholderColor3 = THEME.Dim,
+		Text = "",
+		TextColor3 = THEME.Text,
+		TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Visible = false,
+		ZIndex = 6,
+		Parent = dropdown,
+	})
+	addPadding(search, 8, 8, 0, 0)
+	local optionsList = create("ScrollingFrame", {
+		BackgroundColor3 = Color3.fromRGB(47, 47, 50),
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 59),
+		Size = UDim2.new(1, 0, 0, 112),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = THEME.Muted,
+		Visible = false,
+		ZIndex = 7,
+		Parent = dropdown,
+	})
+	create("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = optionsList,
+	})
+
+	local optionButtons = {}
+	local control = {}
+
+	function control:Set(value, silent)
+		selected = value
+		selectedLabel.Text = tostring(value or "Select")
+		setFlag(window, options.Flag, selected)
+		if not silent then
+			safeCall(options.Callback, selected)
+		end
+	end
+	function control:Get()
+		return selected
+	end
+
+	local function setOpen(value)
+		open = value
+		search.Visible = open
+		optionsList.Visible = open
+		arrow.Text = open and "⌃" or "⌄"
+		row.Size = UDim2.new(1, 0, 0, open and 208 or 68)
+		dropdown.Size = UDim2.new(1, -20, 0, open and 171 or 31)
+		if not open then
+			search.Text = ""
+		end
+	end
+
+	local function rebuild(newValues)
+		values = newValues or values
+		for _, oldButton in ipairs(optionButtons) do
+			oldButton:Destroy()
+		end
+		optionButtons = {}
+
+		for _, value in ipairs(values) do
+			local option = create("TextButton", {
+				AutoButtonColor = false,
+				BackgroundColor3 = THEME.Input,
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				Size = UDim2.new(1, 0, 0, 22),
+				Font = Enum.Font.Gotham,
+				Text = "  " .. tostring(value),
+				TextColor3 = value == selected and THEME.Text or THEME.Muted,
+				TextSize = 9,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 8,
+				Parent = optionsList,
+			})
+			addHover(option, THEME.Input, THEME.SurfaceHover)
+			window:_Connect(option.MouseButton1Click, function()
+				control:Set(value)
+				setOpen(false)
+			end)
+			table.insert(optionButtons, option)
+		end
+	end
+
+	function control:Refresh(newValues, keepSelection)
+		if not keepSelection then
+			selected = newValues and newValues[1] or nil
+		end
+		rebuild(newValues or {})
+		control:Set(selected, true)
+	end
+
+	window:_Connect(selectButton.MouseButton1Click, function()
+		setOpen(not open)
+	end)
+	window:_Connect(search:GetPropertyChangedSignal("Text"), function()
+		local query = string.lower(search.Text)
+		for index, button in ipairs(optionButtons) do
+			button.Visible = query == "" or string.find(string.lower(tostring(values[index])), query, 1, true) ~= nil
+		end
+	end)
+
+	rebuild(values)
+	control:Set(selected, true)
+	control.Instance = row
+	table.insert(section.Controls, control)
+	return control
+end
+
+function ZenthraUI.Section:AddKeybind(options)
+	options = options or {}
+	local section = self
+	local window = self.Window
+	local key = options.Default or Enum.KeyCode.Unknown
+	local listening = false
+	local row = makeControlRow(section, 39)
+	makeNameLabel(row, options.Name or "Keybind", UDim2.fromOffset(11, 0), UDim2.new(1, -92, 1, 0))
+
+	local keyButton = create("TextButton", {
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -11, 0.5, 0),
+		Size = UDim2.fromOffset(65, 21),
+		BackgroundColor3 = THEME.Input,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamMedium,
+		Text = key == Enum.KeyCode.Unknown and "None" or keyName(key),
+		TextColor3 = THEME.Text,
+		TextSize = 9,
+		Parent = row,
+	})
+	addCorner(keyButton, 4)
+	addStroke(keyButton, THEME.Border, 1, 0.2)
+
+	local control = {}
+	function control:Set(newKey, silent)
+		key = newKey or Enum.KeyCode.Unknown
+		keyButton.Text = key == Enum.KeyCode.Unknown and "None" or keyName(key)
+		setFlag(window, options.Flag, key)
+		if not silent then
+			safeCall(options.Changed, key)
+		end
+	end
+	function control:Get()
+		return key
+	end
+
+	window:_Connect(keyButton.MouseButton1Click, function()
+		listening = true
+		keyButton.Text = "..."
+	end)
+	window:_Connect(UserInputService.InputBegan, function(input, gameProcessed)
+		if listening and input.KeyCode ~= Enum.KeyCode.Unknown then
+			listening = false
+			control:Set(input.KeyCode)
+			return
+		end
+		if not gameProcessed and not UserInputService:GetFocusedTextBox() and input.KeyCode == key then
+			safeCall(options.Callback, key)
+		end
+	end)
+
+	control:Set(key, true)
+	control.Instance = row
+	table.insert(section.Controls, control)
+	return control
+end
+
+function ZenthraUI.Section:AddButton(options)
+	if type(options) == "string" then
+		options = { Name = options }
+	end
+	options = options or {}
+	local row = makeControlRow(self, 45)
+	local button = create("TextButton", {
+		AutoButtonColor = false,
+		BackgroundColor3 = THEME.Input,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(10, 9),
+		Size = UDim2.new(1, -20, 0, 27),
+		Font = Enum.Font.GothamMedium,
+		Text = options.Name or "Button",
+		TextColor3 = THEME.Text,
+		TextSize = 10,
+		Parent = row,
+	})
+	addCorner(button, 5)
+	addStroke(button, THEME.Border, 1, 0.18)
+	addHover(button, THEME.Input, THEME.SurfaceHover)
+	self.Window:_Connect(button.MouseButton1Click, function()
+		safeCall(options.Callback)
+	end)
+	local control = { Instance = row, Button = button }
+	table.insert(self.Controls, control)
+	return control
+end
+
+function ZenthraUI.Section:AddInput(options)
+	options = options or {}
+	local section = self
+	local window = self.Window
+	local value = tostring(options.Default or "")
+	local row = makeControlRow(section, 67)
+	makeNameLabel(row, options.Name or "Input", UDim2.fromOffset(11, 2), UDim2.new(1, -22, 0, 21))
+	local box = create("TextBox", {
+		BackgroundColor3 = THEME.Input,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(10, 28),
+		Size = UDim2.new(1, -20, 0, 28),
+		ClearTextOnFocus = options.ClearOnFocus == true,
+		Font = Enum.Font.Gotham,
+		PlaceholderText = options.Placeholder or "Enter text...",
+		PlaceholderColor3 = THEME.Dim,
+		Text = value,
+		TextColor3 = THEME.Text,
+		TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = row,
+	})
+	addCorner(box, 5)
+	addStroke(box, THEME.Border, 1, 0.18)
+	addPadding(box, 9, 9, 0, 0)
+
+	local control = {}
+	function control:Set(newValue, silent)
+		value = tostring(newValue or "")
+		box.Text = value
+		setFlag(window, options.Flag, value)
+		if not silent then
+			safeCall(options.Callback, value)
+		end
+	end
+	function control:Get()
+		return value
+	end
+	window:_Connect(box.FocusLost, function(enterPressed)
+		value = box.Text
+		setFlag(window, options.Flag, value)
+		safeCall(options.Callback, value, enterPressed)
+	end)
+	control:Set(value, true)
+	control.Instance = row
+	control.TextBox = box
+	table.insert(section.Controls, control)
+	return control
+end
+
+function ZenthraUI.Section:AddDivider(options)
+	if type(options) == "string" then
+		options = { Text = options }
+	end
+	options = options or {}
+	local row = makeControlRow(self, 28, false)
+	local text = options.Text or "Section"
+	create("Frame", {
+		BackgroundColor3 = THEME.Border,
+		BackgroundTransparency = 0.18,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0, 10, 0.5, 0),
+		Size = UDim2.new(0.5, -42, 0, 1),
+		Parent = row,
+	})
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(74, 20),
+		Font = Enum.Font.GothamMedium,
+		Text = text,
+		TextColor3 = THEME.Text,
+		TextSize = 9,
+		Parent = row,
+	})
+	create("Frame", {
+		BackgroundColor3 = THEME.Border,
+		BackgroundTransparency = 0.18,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0.5, 32, 0.5, 0),
+		Size = UDim2.new(0.5, -42, 0, 1),
+		Parent = row,
+	})
+	local control = { Instance = row }
+	table.insert(self.Controls, control)
+	return control
+end
+
+function ZenthraUI.Section:AddParagraph(options)
+	if type(options) == "string" then
+		options = { Content = options }
+	end
+	options = options or {}
+	local height = options.Height or 50
+	local row = makeControlRow(self, height)
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(11, 7),
+		Size = UDim2.new(1, -22, 1, -14),
+		Font = Enum.Font.Gotham,
+		Text = options.Content or "Text",
+		TextColor3 = options.Color or THEME.Muted,
+		TextSize = options.TextSize or 9,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Parent = row,
+	})
+	local control = { Instance = row }
+	table.insert(self.Controls, control)
+	return control
+end
+
+ZenthraUI.Section.AddLabel = ZenthraUI.Section.AddParagraph
+ZenthraUI.AddTab = ZenthraUI.CreateTab
+ZenthraUI.Tab.AddCard = ZenthraUI.Tab.CreateSection
+ZenthraUI.Section.CreateToggle = ZenthraUI.Section.AddToggle
+ZenthraUI.Section.CreateSlider = ZenthraUI.Section.AddSlider
+ZenthraUI.Section.CreateDropdown = ZenthraUI.Section.AddDropdown
+ZenthraUI.Section.CreateKeybind = ZenthraUI.Section.AddKeybind
+ZenthraUI.Section.CreateButton = ZenthraUI.Section.AddButton
+ZenthraUI.Section.CreateInput = ZenthraUI.Section.AddInput
+
+function ZenthraUI:Destroy()
+	if self.Destroyed then
+		return
+	end
+	self.Destroyed = true
+	for _, connection in ipairs(self.Connections) do
+		if connection.Connected then
+			connection:Disconnect()
+		end
+	end
+	table.clear(self.Connections)
+	if self.ScreenGui then
+		self.ScreenGui:Destroy()
+	end
+end
+
+return ZenthraUI
+end)()
+
+-- Answer or Die helper
+-- Uses the game's replicated question database and its real answer TextBox.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local previousGui = PlayerGui:FindFirstChild("ZenthraAnswerHelper")
+if previousGui then
+	previousGui:Destroy()
+end
+
+local questions = require(
+	ReplicatedStorage:WaitForChild("Common")
+		:WaitForChild("Modules")
+		:WaitForChild("Databases")
+		:WaitForChild("Questions")
+)
+
+local function normalizeQuestion(value)
+	value = tostring(value or "")
+	value = value:gsub("<[^>]->", "")
+	value = value:lower()
+	return value:gsub("[%p%c%s]+", "")
+end
+
+local questionsByText = {}
+for _, question in pairs(questions) do
+	if type(question) == "table" and type(question.value) == "string" then
+		questionsByText[normalizeQuestion(question.value)] = question
+	end
+end
+
+local state = {
+	autoType = false,
+	strategy = "Longest",
+	answer = "",
+	questionText = "",
+	lastDetectedText = nil,
+	lastTypedQuestion = nil,
+}
+
+local Window = ZenthraUI.CreateWindow({
+	Title = "Answer or Die",
+	GuiName = "ZenthraAnswerHelper",
+	ToggleKey = Enum.KeyCode.RightShift,
+	Size = Vector2.new(680, 430),
+})
+
+local AnswerTab = Window:CreateTab({ Name = "Answers", Icon = "A" })
+local SettingsTab = Window:CreateTab({ Name = "Settings", Icon = "S" })
+
+local CurrentSection = AnswerTab:CreateSection({
+	Title = "Current Round",
+	Description = "live question and accepted answer",
+	Side = "Left",
+})
+
+local ActionSection = AnswerTab:CreateSection({
+	Title = "Actions",
+	Description = "copy or type without auto-submitting",
+	Side = "Right",
+})
+
+local QuestionField = CurrentSection:AddInput({
+	Name = "Current Question",
+	Default = "Waiting for a question...",
+})
+
+local AnswerField = CurrentSection:AddInput({
+	Name = "Best Answer (selectable)",
+	Default = "Waiting for a question...",
+	Callback = function(value)
+		if value ~= "" and value ~= "Waiting for a question..." and value ~= "No matching answer found" then
+			state.answer = value
+		end
+	end,
+})
+
+local StatusField = CurrentSection:AddInput({
+	Name = "Database Status",
+	Default = string.format("%d questions loaded", #questions),
+})
+
+local function notify(title, content)
+	Window:Notify({
+		Title = title,
+		Content = content,
+		Duration = 3,
+	})
+end
+
+local function getGameAnswerBox()
+	local main = PlayerGui:FindFirstChild("Main")
+	local answer = main and main:FindFirstChild("Answer")
+	local leftBg = answer and answer:FindFirstChild("LeftBg")
+	local textBox = leftBg and leftBg:FindFirstChild("TextBox")
+	if textBox and textBox:IsA("TextBox") then
+		return textBox
+	end
+	return nil
+end
+
+local function typeCurrentAnswer(showNotification)
+	if state.answer == "" then
+		if showNotification then
+			notify("Answer", "No answer is available yet.")
+		end
+		return false
+	end
+
+	local textBox = getGameAnswerBox()
+	if not textBox then
+		if showNotification then
+			notify("Answer", "The game's answer box is not available.")
+		end
+		return false
+	end
+
+	textBox.Text = state.answer
+	textBox.CursorPosition = #state.answer + 1
+	if showNotification then
+		notify("Answer Typed", state.answer)
+	end
+	return true
+end
+
+local function selectAnswer(question)
+	local selected = nil
+	local selectedScore = -1
+	local count = 0
+
+	for _, entry in ipairs(question.answers or {}) do
+		local value = type(entry) == "table" and entry.value or entry
+		if type(value) == "string" and value ~= "" then
+			count = count + 1
+			if state.strategy == "First" then
+				if not selected then
+					selected = value
+				end
+			else
+				local score = #(value:gsub("%s+", ""))
+				if score > selectedScore then
+					selected = value
+					selectedScore = score
+				end
+			end
+		end
+	end
+
+	return selected, count
+end
+
+local function detectCurrentQuestion(force)
+	local main = PlayerGui:FindFirstChild("Main")
+	local questionFrame = main and main:FindFirstChild("Question")
+	local bg = questionFrame and questionFrame:FindFirstChild("Bg")
+	local questionLabel = bg and bg:FindFirstChild("QuestionTxt")
+	if not questionLabel or not questionLabel:IsA("TextLabel") then
+		return
+	end
+
+	local displayedText = questionLabel.Text
+	if not force and displayedText == state.lastDetectedText then
+		return
+	end
+	state.lastDetectedText = displayedText
+	state.questionText = displayedText
+	QuestionField:Set(displayedText ~= "" and displayedText or "Waiting for a question...", true)
+
+	local question = questionsByText[normalizeQuestion(displayedText)]
+	if not question then
+		state.answer = ""
+		AnswerField:Set("No matching answer found", true)
+		StatusField:Set(string.format("%d questions loaded - no match", #questions), true)
+		return
+	end
+
+	local selected, answerCount = selectAnswer(question)
+	state.answer = selected or ""
+	AnswerField:Set(selected or "No matching answer found", true)
+	StatusField:Set(string.format("Question #%s - %d accepted answers", tostring(question.id or "?"), answerCount), true)
+
+	local questionKey = tostring(question.id or normalizeQuestion(displayedText))
+	if state.autoType and selected and state.lastTypedQuestion ~= questionKey then
+		state.lastTypedQuestion = questionKey
+		task.defer(typeCurrentAnswer, false)
+	end
+end
+
+ActionSection:AddToggle({
+	Name = "Auto Type Answer",
+	Tag = "AT",
+	Default = false,
+	Flag = "AutoTypeAnswer",
+	Callback = function(enabled)
+		state.autoType = enabled
+		if enabled then
+			state.lastTypedQuestion = nil
+			detectCurrentQuestion(true)
+			typeCurrentAnswer(false)
+		end
+		notify("Auto Type", enabled and "Enabled" or "Disabled")
+	end,
+})
+
+ActionSection:AddButton({
+	Name = "Type Answer Now",
+	Callback = function()
+		typeCurrentAnswer(true)
+	end,
+})
+
+ActionSection:AddButton({
+	Name = "Copy Answer",
+	Callback = function()
+		if state.answer == "" then
+			notify("Copy Answer", "No answer is available yet.")
+			return
+		end
+
+		local copyFunction = setclipboard or toclipboard
+		if type(copyFunction) ~= "function" then
+			notify("Copy Answer", "Clipboard API unavailable; select the answer field instead.")
+			return
+		end
+
+		local ok = pcall(copyFunction, state.answer)
+		notify("Copy Answer", ok and "Copied to clipboard." or "Clipboard copy failed.")
+	end,
+})
+
+ActionSection:AddButton({
+	Name = "Refresh Detection",
+	Callback = function()
+		detectCurrentQuestion(true)
+		notify("Detection", "Question and answer refreshed.")
+	end,
+})
+
+ActionSection:AddParagraph({
+	Content = "Auto Type only fills the game's real answer box. It does not press Submit, so you stay in control.",
+	Height = 58,
+})
+
+local DetectionSection = SettingsTab:CreateSection({
+	Title = "Answer Selection",
+	Description = "choose which accepted answer is shown",
+	Side = "Left",
+})
+
+DetectionSection:AddDropdown({
+	Name = "Strategy",
+	Values = { "Longest", "First" },
+	Default = "Longest",
+	Flag = "AnswerStrategy",
+	Callback = function(value)
+		state.strategy = value
+		state.lastTypedQuestion = nil
+		detectCurrentQuestion(true)
+	end,
+})
+
+local InterfaceSection = SettingsTab:CreateSection({
+	Title = "Interface",
+	Side = "Right",
+})
+
+InterfaceSection:AddParagraph({
+	Content = "Press RightShift to collapse or restore Zenthra.",
+	Height = 46,
+})
+InterfaceSection:AddButton({
+	Name = "Destroy Interface",
+	Callback = function()
+		Window:Destroy()
+	end,
+})
+
+AnswerTab:Select()
+detectCurrentQuestion(true)
+
+task.spawn(function()
+	while not Window.Destroyed do
+		local ok, message = pcall(detectCurrentQuestion, false)
+		if not ok then
+			warn("[AnswerOrDie Zenthra] " .. tostring(message))
+		end
+		task.wait(0.2)
+	end
+end)
+
+notify("Answer or Die", "Helper loaded. RightShift toggles the interface.")
