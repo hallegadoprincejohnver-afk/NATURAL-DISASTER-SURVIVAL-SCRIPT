@@ -1,0 +1,2635 @@
+--[[
+	Clear UI Library
+	A close Roblox/Luau recreation of the supplied Clear screenshots.
+
+	QUICK START (ModuleScript):
+		local Clear = require(path.to.ClearUI)
+		local Window = Clear:Demo()
+
+	QUICK START (raw GitHub file):
+		local Clear = loadstring(game:HttpGet("YOUR_RAW_URL"))()
+		local Window = Clear:Demo()
+
+	CUSTOM WINDOW:
+		local Window = Clear:CreateWindow({
+			Title = "Clear",
+			StartOpen = true,
+			ToggleKey = Enum.KeyCode.LeftAlt,
+		})
+
+		local World = Window:AddTab({ Title = "World", Icon = "World" })
+		local Card = World:AddSection({
+			Title = "Custom Skybox",
+			Description = "change the world skybox",
+			Locked = true,
+		})
+
+		Card:AddToggle({ Badge = "None", Default = true, Callback = function(value) end })
+		Card:AddDropdown({
+			Title = "Skybox Theme",
+			Options = { "Default", "Minecraft", "PurpleDay", "RedNight" },
+			Default = "RedNight",
+			Open = true,
+			Callback = function(value) end,
+		})
+]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+
+local Clear = {}
+Clear.__index = Clear
+Clear.Version = "1.0.0"
+
+local THEME = {
+	Window = Color3.fromRGB(6, 7, 7),
+	HeaderTop = Color3.fromRGB(72, 73, 75),
+	HeaderMiddle = Color3.fromRGB(43, 44, 46),
+	HeaderBottom = Color3.fromRGB(8, 9, 10),
+	Card = Color3.fromRGB(17, 17, 18),
+	CardBorder = Color3.fromRGB(81, 82, 86),
+	Field = Color3.fromRGB(49, 49, 51),
+	FieldHover = Color3.fromRGB(57, 57, 60),
+	Divider = Color3.fromRGB(37, 38, 40),
+	Text = Color3.fromRGB(225, 225, 228),
+	TextMuted = Color3.fromRGB(111, 112, 116),
+	TextDim = Color3.fromRGB(139, 139, 144),
+	White = Color3.fromRGB(239, 239, 241),
+	ToggleOff = Color3.fromRGB(71, 72, 76),
+	ToggleOn = Color3.fromRGB(207, 208, 211),
+	Knob = Color3.fromRGB(50, 51, 54),
+	Badge = Color3.fromRGB(99, 100, 104),
+}
+
+local ICONS = {
+	Combat = "⚔",
+	Detections = "⬡",
+	Visuals = "◉",
+	Player = "♙",
+	Sword = "◇",
+	Avatar = "♧",
+	World = "◎",
+	Blatant = "♜",
+	Misc = "⚙",
+	GUI = "⚙",
+}
+
+local function create(className, properties, children)
+	local object = Instance.new(className)
+	for property, value in pairs(properties or {}) do
+		object[property] = value
+	end
+	for _, child in ipairs(children or {}) do
+		child.Parent = object
+	end
+	return object
+end
+
+local function addCorner(parent, radius)
+	return create("UICorner", { CornerRadius = UDim.new(0, radius), Parent = parent })
+end
+
+local function addStroke(parent, color, thickness, transparency)
+	return create("UIStroke", {
+		Color = color,
+		Thickness = thickness or 1,
+		Transparency = transparency or 0,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Parent = parent,
+	})
+end
+
+local function addPadding(parent, left, right, top, bottom)
+	return create("UIPadding", {
+		PaddingLeft = UDim.new(0, left or 0),
+		PaddingRight = UDim.new(0, right or 0),
+		PaddingTop = UDim.new(0, top or 0),
+		PaddingBottom = UDim.new(0, bottom or 0),
+		Parent = parent,
+	})
+end
+
+local function tween(object, time, properties)
+	local animation = TweenService:Create(
+		object,
+		TweenInfo.new(time or 0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		properties
+	)
+	animation:Play()
+	return animation
+end
+
+local function callback(fn, ...)
+	if type(fn) ~= "function" then
+		return
+	end
+	local args = table.pack(...)
+	task.spawn(function()
+		local ok, message = xpcall(function()
+			fn(table.unpack(args, 1, args.n))
+		end, debug.traceback)
+		if not ok then
+			warn("[Clear UI] callback error:\n" .. tostring(message))
+		end
+	end)
+end
+
+local function connect(window, signal, fn)
+	local connection = signal:Connect(fn)
+	table.insert(window._connections, connection)
+	return connection
+end
+
+local function textLabel(properties)
+	properties = properties or {}
+	properties.BackgroundTransparency = properties.BackgroundTransparency == nil and 1
+		or properties.BackgroundTransparency
+	properties.BorderSizePixel = 0
+	properties.Font = properties.Font or Enum.Font.Gotham
+	properties.TextColor3 = properties.TextColor3 or THEME.Text
+	properties.TextSize = properties.TextSize or 11
+	return create("TextLabel", properties)
+end
+
+local function textButton(properties)
+	properties = properties or {}
+	properties.AutoButtonColor = false
+	properties.BorderSizePixel = 0
+	properties.Font = properties.Font or Enum.Font.Gotham
+	properties.TextColor3 = properties.TextColor3 or THEME.Text
+	properties.TextSize = properties.TextSize or 11
+	return create("TextButton", properties)
+end
+
+local function makeBrandMark(parent, size, color, thickness)
+	local mark = create("Frame", {
+		Name = "BrandMark",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(size, size),
+		Parent = parent,
+	})
+	local length = math.floor(size * 0.35)
+	local width = thickness or 2
+	local pieces = {
+		{ 0, 0, length, width },
+		{ 0, 0, width, length },
+		{ size - length, 0, length, width },
+		{ size - width, 0, width, length },
+		{ 0, size - width, length, width },
+		{ 0, size - length, width, length },
+		{ size - length, size - width, length, width },
+		{ size - width, size - length, width, length },
+	}
+	for _, piece in ipairs(pieces) do
+		create("Frame", {
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(piece[1], piece[2]),
+			Size = UDim2.fromOffset(piece[3], piece[4]),
+			Parent = mark,
+		})
+	end
+	return mark
+end
+
+local function makeSearchIcon(parent, size, color)
+	local holder = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(size, size),
+		Parent = parent,
+	})
+	local circle = create("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(2, 2),
+		Size = UDim2.fromOffset(size - 7, size - 7),
+		Parent = holder,
+	})
+	addCorner(circle, 100)
+	addStroke(circle, color, 2, 0.1)
+	create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1, -2, 1, -1),
+		Rotation = 45,
+		Size = UDim2.fromOffset(2, math.max(4, math.floor(size * 0.35))),
+		Parent = holder,
+	})
+	return holder
+end
+
+local function makeLockIcon(parent, color)
+	local holder = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(14, 15),
+		Parent = parent,
+	})
+	local shackle = create("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(3, 1),
+		Size = UDim2.fromOffset(8, 8),
+		Parent = holder,
+	})
+	addCorner(shackle, 5)
+	addStroke(shackle, color, 1.5, 0.25)
+	local body = create("Frame", {
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.72,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(1, 7),
+		Size = UDim2.fromOffset(12, 8),
+		Parent = holder,
+	})
+	addCorner(body, 2)
+	addStroke(body, color, 1, 0.4)
+	return holder
+end
+
+local function makeDraggable(window, handle, target, onDragged)
+	local dragging = false
+	local dragType
+	local dragStart
+	local startPosition
+	local function stopDragging()
+		dragging = false
+		dragType = nil
+	end
+
+	connect(window, handle.InputBegan, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			dragging = true
+			dragType = input.UserInputType
+			dragStart = input.Position
+			startPosition = target.Position
+		end
+	end)
+
+	connect(window, UserInputService.InputChanged, function(input)
+		if not dragging then
+			return
+		end
+		if not handle.Visible then
+			stopDragging()
+			return
+		end
+		if dragType == Enum.UserInputType.MouseButton1
+			and not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+		then
+			stopDragging()
+			return
+		end
+		local isMouseDrag = dragType == Enum.UserInputType.MouseButton1
+			and input.UserInputType == Enum.UserInputType.MouseMovement
+		local isTouchDrag = dragType == Enum.UserInputType.Touch
+			and input.UserInputType == Enum.UserInputType.Touch
+		if not isMouseDrag and not isTouchDrag then
+			return
+		end
+		local delta = input.Position - dragStart
+		if onDragged and (math.abs(delta.X) > 4 or math.abs(delta.Y) > 4) then
+			onDragged()
+		end
+
+		local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+		if not viewport then
+			return
+		end
+		local size = target.AbsoluteSize
+		local anchor = target.AnchorPoint
+		local pointX = startPosition.X.Scale * viewport.X + startPosition.X.Offset + delta.X
+		local pointY = startPosition.Y.Scale * viewport.Y + startPosition.Y.Offset + delta.Y
+		local minX = 8 + size.X * anchor.X
+		local maxX = viewport.X - 8 - size.X * (1 - anchor.X)
+		local minY = 8 + size.Y * anchor.Y
+		local maxY = viewport.Y - 8 - size.Y * (1 - anchor.Y)
+		pointX = math.clamp(pointX, minX, math.max(minX, maxX))
+		pointY = math.clamp(pointY, minY, math.max(minY, maxY))
+		target.Position = UDim2.new(
+			startPosition.X.Scale,
+			pointX - startPosition.X.Scale * viewport.X,
+			startPosition.Y.Scale,
+			pointY - startPosition.Y.Scale * viewport.Y
+		)
+	end)
+
+	connect(window, UserInputService.InputEnded, function(input)
+		if dragging and input.UserInputType == dragType then
+			stopDragging()
+		end
+	end)
+	connect(window, UserInputService.WindowFocusReleased, stopDragging)
+end
+
+local function resolveParent(customParent)
+	if customParent then
+		return customParent
+	end
+	local player = Players.LocalPlayer
+	if not player then
+		return game:GetService("CoreGui")
+	end
+	return player:WaitForChild("PlayerGui")
+end
+
+local function updatePageCanvas(tab)
+	if tab and tab._layout and tab._page then
+		tab._page.CanvasSize = UDim2.fromOffset(0, tab._layout.AbsoluteContentSize.Y + 3)
+	end
+end
+
+function Clear:CreateWindow(options)
+	options = options or {}
+	local window = {
+		_tabs = {},
+		_connections = {},
+		_activeTab = nil,
+		_visible = options.StartOpen ~= false,
+		_toggleKey = options.ToggleKey or Enum.KeyCode.LeftAlt,
+		_capturingKey = false,
+	}
+
+	local parent = resolveParent(options.Parent)
+	local old = parent:FindFirstChild(options.GuiName or "ClearUI")
+	if old then
+		old:Destroy()
+	end
+
+	local gui = create("ScreenGui", {
+		Name = options.GuiName or "ClearUI",
+		DisplayOrder = options.DisplayOrder or 50,
+		IgnoreGuiInset = true,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = parent,
+	})
+	window.Gui = gui
+	local launcherBounds = create("Frame", {
+		Name = "LauncherBounds",
+		Active = false,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 0),
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 0,
+		Parent = gui,
+	})
+
+	local launcher = textButton({
+		Name = "Launcher",
+		AnchorPoint = options.LauncherAnchorPoint or Vector2.new(0.5, 0.5),
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		Position = options.LauncherPosition or UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(112, 48),
+		Text = "",
+		Visible = not window._visible,
+		ZIndex = 20,
+		Parent = gui,
+	})
+	addCorner(launcher, 10)
+	addStroke(launcher, Color3.fromRGB(118, 120, 124), 1.2, 0.12)
+	create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, THEME.HeaderTop),
+			ColorSequenceKeypoint.new(0.76, THEME.HeaderMiddle),
+			ColorSequenceKeypoint.new(1, THEME.HeaderBottom),
+		}),
+		Rotation = 90,
+		Parent = launcher,
+	})
+	local launcherDrag = create("UIDragDetector", {
+		Name = "LauncherDrag",
+		BoundingUI = launcherBounds,
+		DragRelativity = Enum.UIDragDetectorDragRelativity.Absolute,
+		DragSpace = Enum.UIDragDetectorDragSpace.Parent,
+		DragStyle = Enum.UIDragDetectorDragStyle.TranslatePlane,
+		ResponseStyle = Enum.UIDragDetectorResponseStyle.Offset,
+		Parent = launcher,
+	})
+	local launcherMark = makeBrandMark(launcher, 20, Color3.fromRGB(238, 238, 240), 2)
+	launcherMark.Position = UDim2.fromOffset(17, 14)
+	launcherMark.ZIndex = 21
+	textLabel({
+		Name = "LauncherTitle",
+		Position = UDim2.fromOffset(45, 0),
+		Size = UDim2.new(1, -53, 1, 0),
+		Font = Enum.Font.GothamBold,
+		Text = "Clear",
+		TextColor3 = Color3.fromRGB(233, 233, 235),
+		TextSize = 16,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 21,
+		Parent = launcher,
+	})
+
+	local main = create("Frame", {
+		Name = "Window",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = THEME.Window,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Position = options.Position or UDim2.fromScale(0.5, 0.5),
+		Size = options.Size or UDim2.fromOffset(748, 480),
+		Visible = window._visible,
+		Parent = gui,
+	})
+	window.Main = main
+	addCorner(main, 18)
+	addStroke(main, Color3.fromRGB(118, 120, 124), 1.5, 0.12)
+
+	local scale = create("UIScale", { Scale = 1, Parent = main })
+	local function fitToViewport()
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return
+		end
+		local view = camera.ViewportSize
+		local wanted = main.AbsoluteSize
+		if wanted.X <= 0 or wanted.Y <= 0 then
+			wanted = Vector2.new(748, 480)
+		end
+		scale.Scale = math.min(1, (view.X - 18) / wanted.X, (view.Y - 18) / wanted.Y)
+	end
+	task.defer(fitToViewport)
+	if workspace.CurrentCamera then
+		connect(window, workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"), fitToViewport)
+	end
+
+	local header = create("Frame", {
+		Name = "Header",
+		-- UIGradient colors multiply the frame color; white preserves the
+		-- intended gray-to-black values instead of crushing them to black.
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 52),
+		ZIndex = 3,
+		Parent = main,
+	})
+	create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, THEME.HeaderTop),
+			ColorSequenceKeypoint.new(0.76, THEME.HeaderMiddle),
+			ColorSequenceKeypoint.new(1, THEME.HeaderBottom),
+		}),
+		Rotation = 90,
+		Parent = header,
+	})
+	addCorner(header, 18)
+	create("Frame", {
+		Name = "HeaderBottomBand",
+		BackgroundColor3 = Color3.fromRGB(4, 5, 6),
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0, 0, 1, -6),
+		Size = UDim2.new(1, 0, 0, 6),
+		ZIndex = 4,
+		Parent = header,
+	})
+	create("Frame", {
+		Name = "HeaderDivider",
+		BackgroundColor3 = Color3.fromRGB(65, 66, 68),
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0, 0, 1, -1),
+		Size = UDim2.new(1, 0, 0, 1),
+		ZIndex = 4,
+		Parent = header,
+	})
+
+	local brandMark = makeBrandMark(header, 21, Color3.fromRGB(238, 238, 240), 2)
+	brandMark.Position = UDim2.fromOffset(24, 14)
+	brandMark.ZIndex = 5
+	textLabel({
+		Name = "ClearTitle",
+		Position = UDim2.fromOffset(56, 2),
+		Size = UDim2.new(0, 190, 1, -3),
+		Font = Enum.Font.GothamBold,
+		Text = "Clear",
+		TextColor3 = THEME.Text,
+		TextSize = 18,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 5,
+		Parent = header,
+	})
+	local expandButton = textButton({
+		Name = "ExpandButton",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 4),
+		Size = UDim2.fromOffset(45, 44),
+		Text = "",
+		ZIndex = 7,
+		Parent = header,
+	})
+
+	local searchButton = textButton({
+		Name = "SearchButton",
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.fromOffset(52, 52),
+		Text = "",
+		ZIndex = 5,
+		Parent = header,
+	})
+	local searchIcon = makeSearchIcon(searchButton, 14, Color3.fromRGB(166, 167, 169))
+	searchIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+	searchIcon.Position = UDim2.fromScale(0.5, 0.5)
+	searchIcon.ZIndex = 6
+
+	local searchBox = create("TextBox", {
+		Name = "SearchBox",
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundColor3 = Color3.fromRGB(24, 25, 26),
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham,
+		PlaceholderColor3 = THEME.TextMuted,
+		PlaceholderText = "Search tabs...",
+		Position = UDim2.new(1, -60, 0, 12),
+		Size = UDim2.fromOffset(174, 28),
+		Text = "",
+		TextColor3 = THEME.Text,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Visible = false,
+		ZIndex = 7,
+		Parent = header,
+	})
+	addCorner(searchBox, 5)
+	addStroke(searchBox, Color3.fromRGB(80, 81, 84), 1, 0.35)
+	addPadding(searchBox, 9, 8, 0, 0)
+
+	local sidebar = create("Frame", {
+		Name = "Sidebar",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, 52),
+		Size = UDim2.new(0, 153, 1, -52),
+		Parent = main,
+	})
+	create("Frame", {
+		BackgroundColor3 = Color3.fromRGB(24, 25, 26),
+		BackgroundTransparency = 0.16,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.new(0, 1, 1, 0),
+		Parent = sidebar,
+	})
+	local tabHolder = create("Frame", {
+		Name = "TabHolder",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, 17),
+		Size = UDim2.new(1, 0, 1, -17),
+		Parent = sidebar,
+	})
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		Padding = UDim.new(0, 0),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = tabHolder,
+	})
+
+	local pages = create("Frame", {
+		Name = "Pages",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(153, 52),
+		Size = UDim2.new(1, -153, 1, -52),
+		Parent = main,
+	})
+
+	function window:SetVisible(visible)
+		self._visible = not not visible
+		if self._visible then
+			launcher.Visible = false
+			main.Visible = true
+			main.BackgroundTransparency = 1
+			tween(main, 0.18, { BackgroundTransparency = 0 })
+		else
+			searchBox.Visible = false
+			searchBox.Text = ""
+			main.Visible = false
+			launcher.Visible = true
+		end
+	end
+
+	function window:Toggle()
+		self:SetVisible(not self._visible)
+	end
+
+	function window:SetToggleKey(keyCode)
+		if typeof(keyCode) == "EnumItem" and keyCode.EnumType == Enum.KeyCode then
+			self._toggleKey = keyCode
+		end
+	end
+
+	function window:GetToggleKey()
+		return self._toggleKey
+	end
+
+	function window:SetKeyCapture(active)
+		self._capturingKey = not not active
+	end
+
+	function window:SelectTab(tabOrName)
+		local chosen
+		for _, tab in ipairs(self._tabs) do
+			if tab == tabOrName or tab.Title == tabOrName then
+				chosen = tab
+				break
+			end
+		end
+		if not chosen then
+			return
+		end
+		self._activeTab = chosen
+		for _, tab in ipairs(self._tabs) do
+			local active = tab == chosen
+			tab._page.Visible = active
+			tween(tab._label, 0.14, { TextColor3 = active and THEME.White or THEME.TextMuted })
+			tween(tab._icon, 0.14, { TextColor3 = active and THEME.White or THEME.TextMuted })
+			tab._activeBar.Visible = active
+		end
+	end
+
+	function window:AddTab(config)
+		config = config or {}
+		local title = config.Title or "Tab"
+		local order = #self._tabs + 1
+		local tab = {
+			Title = title,
+			_window = self,
+			_sections = {},
+		}
+
+		local button = textButton({
+			Name = title,
+			BackgroundTransparency = 1,
+			LayoutOrder = order,
+			Size = UDim2.new(1, 0, 0, 42),
+			Text = "",
+			Parent = tabHolder,
+		})
+		local activeBar = create("Frame", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = THEME.White,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0, 14, 0.5, 0),
+			Size = UDim2.fromOffset(3, 22),
+			Visible = false,
+			Parent = button,
+		})
+		addCorner(activeBar, 2)
+
+		local icon = textLabel({
+			Position = UDim2.fromOffset(25, 0),
+			Size = UDim2.fromOffset(16, 42),
+			Font = Enum.Font.GothamMedium,
+			Text = config.IconText or ICONS[config.Icon or title] or "◇",
+			TextColor3 = THEME.TextMuted,
+			TextSize = 15,
+			Parent = button,
+		})
+		local label = textLabel({
+			Position = UDim2.fromOffset(44, 0),
+			Size = UDim2.new(1, -51, 1, 0),
+			Font = Enum.Font.GothamMedium,
+			Text = title,
+			TextColor3 = THEME.TextMuted,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = button,
+		})
+
+		local page = create("ScrollingFrame", {
+			Name = title .. "Page",
+			Active = true,
+			AutomaticCanvasSize = Enum.AutomaticSize.None,
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			CanvasSize = UDim2.fromOffset(0, 0),
+			Position = UDim2.fromOffset(29, 35),
+			ScrollBarImageColor3 = Color3.fromRGB(154, 155, 157),
+			ScrollBarImageTransparency = 0.14,
+			ScrollBarThickness = 3,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
+			Size = UDim2.new(0, 258, 1, -69),
+			TopImage = "rbxasset://textures/ui/Scroll/scroll-middle.png",
+			MidImage = "rbxasset://textures/ui/Scroll/scroll-middle.png",
+			BottomImage = "rbxasset://textures/ui/Scroll/scroll-middle.png",
+			Visible = false,
+			Parent = pages,
+		})
+		local pageLayout = create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			HorizontalAlignment = Enum.HorizontalAlignment.Left,
+			Padding = UDim.new(0, 10),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = page,
+		})
+		tab._button = button
+		tab._activeBar = activeBar
+		tab._icon = icon
+		tab._label = label
+		tab._page = page
+		tab._layout = pageLayout
+		table.insert(self._tabs, tab)
+
+		connect(self, pageLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
+			updatePageCanvas(tab)
+		end)
+		connect(self, button.MouseButton1Click, function()
+			self:SelectTab(tab)
+		end)
+		connect(self, button.MouseEnter, function()
+			if self._activeTab ~= tab then
+				tween(label, 0.12, { TextColor3 = THEME.TextDim })
+				tween(icon, 0.12, { TextColor3 = THEME.TextDim })
+			end
+		end)
+		connect(self, button.MouseLeave, function()
+			if self._activeTab ~= tab then
+				tween(label, 0.12, { TextColor3 = THEME.TextMuted })
+				tween(icon, 0.12, { TextColor3 = THEME.TextMuted })
+			end
+		end)
+
+		function tab:AddSection(sectionConfig)
+			sectionConfig = sectionConfig or {}
+			local section = {
+				_tab = self,
+				_window = self._window,
+				_controls = {},
+			}
+			local sectionFrame = create("Frame", {
+				Name = sectionConfig.Title or "Section",
+				BackgroundColor3 = THEME.Card,
+				BorderSizePixel = 0,
+				LayoutOrder = #self._sections + 1,
+				Size = UDim2.fromOffset(237, 68),
+				Parent = page,
+			})
+			addCorner(sectionFrame, 5)
+			addStroke(sectionFrame, THEME.CardBorder, 1, 0.12)
+			local sectionLayout = create("UIListLayout", {
+				FillDirection = Enum.FillDirection.Vertical,
+				HorizontalAlignment = Enum.HorizontalAlignment.Left,
+				Padding = UDim.new(0, 0),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Parent = sectionFrame,
+			})
+
+			local sectionHeader = create("Frame", {
+				BackgroundTransparency = 1,
+				LayoutOrder = 0,
+				Size = UDim2.new(1, 0, 0, 58),
+				Parent = sectionFrame,
+			})
+			textLabel({
+				Position = UDim2.fromOffset(17, 11),
+				Size = UDim2.new(1, -48, 0, 20),
+				Font = Enum.Font.GothamBold,
+				Text = sectionConfig.Title or "Section",
+				TextColor3 = THEME.Text,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = sectionHeader,
+			})
+			textLabel({
+				Position = UDim2.fromOffset(17, 31),
+				Size = UDim2.new(1, -48, 0, 15),
+				Text = sectionConfig.Description or "",
+				TextColor3 = Color3.fromRGB(94, 95, 98),
+				TextSize = 9,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = sectionHeader,
+			})
+			if sectionConfig.Locked then
+				local lock = makeLockIcon(sectionHeader, Color3.fromRGB(101, 102, 106))
+				lock.Position = UDim2.new(1, -24, 0, 13)
+			end
+
+			local function refreshSection()
+				task.defer(function()
+					if sectionFrame.Parent then
+						sectionFrame.Size = UDim2.fromOffset(237, sectionLayout.AbsoluteContentSize.Y + 10)
+						updatePageCanvas(tab)
+					end
+				end)
+			end
+			connect(self._window, sectionLayout:GetPropertyChangedSignal("AbsoluteContentSize"), refreshSection)
+
+			local function addDivider(control)
+				create("Frame", {
+					BackgroundColor3 = THEME.Divider,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, 0),
+					Size = UDim2.new(1, 0, 0, 1),
+					Parent = control,
+				})
+			end
+
+			function section:AddToggle(toggleConfig)
+				toggleConfig = toggleConfig or {}
+				local state = toggleConfig.Default == true
+				local row = textButton({
+					Name = toggleConfig.Title or "Toggle",
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 36),
+					Text = "",
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+
+				local title = textLabel({
+					Position = UDim2.fromOffset(10, 1),
+					Size = UDim2.new(1, -62, 1, -1),
+					Text = toggleConfig.Title or "↕",
+					TextColor3 = THEME.TextDim,
+					TextSize = 12,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+
+				if toggleConfig.Badge then
+					local width = math.max(32, #tostring(toggleConfig.Badge) * 6 + 10)
+					local badge = textLabel({
+						BackgroundColor3 = THEME.Badge,
+						BackgroundTransparency = 0,
+						Position = UDim2.fromOffset(toggleConfig.Title and 86 or 36, 11),
+						Size = UDim2.fromOffset(width, 15),
+						Font = Enum.Font.GothamMedium,
+						Text = tostring(toggleConfig.Badge),
+						TextColor3 = Color3.fromRGB(213, 213, 216),
+						TextSize = 8,
+						Parent = row,
+					})
+				addCorner(badge, 3)
+				end
+
+				local track = create("Frame", {
+					AnchorPoint = Vector2.new(1, 0.5),
+					BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff,
+					BorderSizePixel = 0,
+					Position = UDim2.new(1, -16, 0.5, 1),
+					Size = UDim2.fromOffset(26, 13),
+					Parent = row,
+				})
+				addCorner(track, 20)
+				local knob = create("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundColor3 = state and THEME.Knob or Color3.fromRGB(181, 182, 185),
+					BorderSizePixel = 0,
+					Position = state and UDim2.new(1, -6.5, 0.5, 0) or UDim2.fromOffset(6.5, 6.5),
+					Size = UDim2.fromOffset(9, 9),
+					Parent = track,
+				})
+				addCorner(knob, 20)
+
+				local control = {}
+				function control:Set(value, silent)
+					state = not not value
+					tween(track, 0.16, { BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff })
+					tween(knob, 0.16, {
+						BackgroundColor3 = state and THEME.Knob or Color3.fromRGB(181, 182, 185),
+						Position = state and UDim2.new(1, -6.5, 0.5, 0) or UDim2.fromOffset(6.5, 6.5),
+					})
+					if not silent then
+						callback(toggleConfig.Callback, state)
+					end
+				end
+				function control:Get()
+					return state
+				end
+				connect(self._window, row.MouseButton1Click, function()
+					control:Set(not state)
+				end)
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddDropdown(dropdownConfig)
+				dropdownConfig = dropdownConfig or {}
+				local optionsList = dropdownConfig.Options or {}
+				local selected = dropdownConfig.Default or optionsList[1] or "None"
+				local open = dropdownConfig.Open == true
+				local row = create("Frame", {
+					Name = dropdownConfig.Title or "Dropdown",
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, open and 254 or 66),
+					ClipsDescendants = true,
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				textLabel({
+					Position = UDim2.fromOffset(10, 8),
+					Size = UDim2.new(1, -20, 0, 18),
+					Font = Enum.Font.GothamMedium,
+					Text = dropdownConfig.Title or "Dropdown",
+					TextColor3 = THEME.Text,
+					TextSize = 10,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+
+				local box = create("Frame", {
+					BackgroundColor3 = THEME.Field,
+					BorderSizePixel = 0,
+					ClipsDescendants = true,
+					Position = UDim2.fromOffset(9, 29),
+					Size = UDim2.new(1, -27, 0, open and 213 or 25),
+					Parent = row,
+				})
+				addCorner(box, 5)
+				addStroke(box, Color3.fromRGB(68, 69, 72), 1, 0.65)
+
+				local selectButton = textButton({
+					BackgroundColor3 = THEME.Field,
+					Position = UDim2.fromOffset(0, 0),
+					Size = UDim2.new(1, 0, 0, 25),
+					Text = "",
+					Parent = box,
+				})
+				local selectedLabel = textLabel({
+					Position = UDim2.fromOffset(10, 0),
+					Size = UDim2.new(1, -36, 1, 0),
+					Font = Enum.Font.GothamMedium,
+					Text = tostring(selected),
+					TextColor3 = Color3.fromRGB(227, 227, 229),
+					TextSize = 9,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = selectButton,
+				})
+				textLabel({
+					Position = UDim2.new(1, -25, 0, 0),
+					Size = UDim2.fromOffset(22, 25),
+					Text = "↕",
+					TextColor3 = Color3.fromRGB(206, 206, 209),
+					TextSize = 10,
+					Parent = selectButton,
+				})
+
+				local search = create("TextBox", {
+					BackgroundColor3 = THEME.Field,
+					BorderSizePixel = 0,
+					ClearTextOnFocus = false,
+					Font = Enum.Font.Gotham,
+					PlaceholderColor3 = Color3.fromRGB(133, 134, 137),
+					PlaceholderText = "⌕ Search...",
+					Position = UDim2.fromOffset(0, 25),
+					Size = UDim2.new(1, 0, 0, 25),
+					Text = "",
+					TextColor3 = THEME.Text,
+					TextSize = 9,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Visible = open,
+					Parent = box,
+				})
+				addPadding(search, 9, 7, 0, 0)
+				create("Frame", {
+					BackgroundColor3 = Color3.fromRGB(58, 59, 61),
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, 24),
+					Size = UDim2.new(1, 0, 0, 1),
+					Parent = search,
+				})
+
+				local list = create("ScrollingFrame", {
+					BackgroundColor3 = THEME.Field,
+					BorderSizePixel = 0,
+					CanvasSize = UDim2.fromOffset(0, #optionsList * 16),
+					Position = UDim2.fromOffset(0, 50),
+					ScrollBarImageColor3 = Color3.fromRGB(92, 93, 96),
+					ScrollBarThickness = 3,
+					ScrollingDirection = Enum.ScrollingDirection.Y,
+					Size = UDim2.new(1, 0, 0, 163),
+					Visible = open,
+					Parent = box,
+				})
+				local listLayout = create("UIListLayout", {
+					FillDirection = Enum.FillDirection.Vertical,
+					HorizontalAlignment = Enum.HorizontalAlignment.Left,
+					Padding = UDim.new(0, 0),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Parent = list,
+				})
+
+				local optionButtons = {}
+				local control = {}
+				local function populate(filter)
+					filter = string.lower(filter or "")
+					for _, optionButton in ipairs(optionButtons) do
+						optionButton:Destroy()
+					end
+					table.clear(optionButtons)
+					local visibleCount = 0
+					for index, option in ipairs(optionsList) do
+						local optionText = tostring(option)
+						if filter == "" or string.find(string.lower(optionText), filter, 1, true) then
+							visibleCount += 1
+							local optionButton = textButton({
+								BackgroundColor3 = THEME.Field,
+								LayoutOrder = index,
+								Size = UDim2.new(1, -4, 0, 16),
+								Text = optionText,
+								TextColor3 = optionText == tostring(selected) and Color3.fromRGB(209, 209, 212)
+									or Color3.fromRGB(148, 149, 153),
+								TextSize = 9,
+								TextXAlignment = Enum.TextXAlignment.Left,
+								Parent = list,
+							})
+							addPadding(optionButton, 9, 3, 0, 0)
+							connect(self._window, optionButton.MouseEnter, function()
+								tween(optionButton, 0.1, { BackgroundColor3 = THEME.FieldHover })
+							end)
+							connect(self._window, optionButton.MouseLeave, function()
+								tween(optionButton, 0.1, { BackgroundColor3 = THEME.Field })
+							end)
+							connect(self._window, optionButton.MouseButton1Click, function()
+								control:Set(option)
+							end)
+							table.insert(optionButtons, optionButton)
+						end
+					end
+					list.CanvasSize = UDim2.fromOffset(0, visibleCount * 16)
+				end
+
+				function control:Set(value, silent)
+					selected = value
+					selectedLabel.Text = tostring(value)
+					populate(search.Text)
+					if not silent then
+						callback(dropdownConfig.Callback, value)
+					end
+				end
+				function control:Get()
+					return selected
+				end
+				function control:SetOpen(value)
+					open = not not value
+					search.Visible = open
+					list.Visible = open
+					tween(row, 0.18, { Size = UDim2.new(1, 0, 0, open and 254 or 66) })
+					tween(box, 0.18, { Size = UDim2.new(1, -27, 0, open and 213 or 25) })
+					task.delay(0.2, refreshSection)
+				end
+				function control:Refresh(newOptions, keepSelection)
+					optionsList = newOptions or {}
+					if not keepSelection then
+						selected = optionsList[1] or "None"
+						selectedLabel.Text = tostring(selected)
+					end
+					populate(search.Text)
+				end
+
+				connect(self._window, selectButton.MouseButton1Click, function()
+					control:SetOpen(not open)
+				end)
+				connect(self._window, search:GetPropertyChangedSignal("Text"), function()
+					populate(search.Text)
+				end)
+				populate("")
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddButton(buttonConfig)
+				buttonConfig = buttonConfig or {}
+				local row = create("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 43),
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				local button = textButton({
+					BackgroundColor3 = THEME.Field,
+					Position = UDim2.fromOffset(9, 9),
+					Size = UDim2.new(1, -18, 0, 25),
+					Font = Enum.Font.GothamMedium,
+					Text = buttonConfig.Title or "Button",
+					TextColor3 = THEME.Text,
+					TextSize = 10,
+					Parent = row,
+				})
+				addCorner(button, 4)
+				connect(self._window, button.MouseButton1Click, function()
+					callback(buttonConfig.Callback)
+				end)
+				connect(self._window, button.MouseEnter, function()
+					tween(button, 0.1, { BackgroundColor3 = THEME.FieldHover })
+				end)
+				connect(self._window, button.MouseLeave, function()
+					tween(button, 0.1, { BackgroundColor3 = THEME.Field })
+				end)
+				local control = { Instance = button }
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddSlider(sliderConfig)
+				sliderConfig = sliderConfig or {}
+				local minimum = sliderConfig.Min or 0
+				local maximum = sliderConfig.Max or 100
+				local value = math.clamp(sliderConfig.Default or minimum, minimum, maximum)
+				local row = create("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 54),
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				local label = textLabel({
+					Position = UDim2.fromOffset(10, 6),
+					Size = UDim2.new(1, -20, 0, 18),
+					Font = Enum.Font.GothamMedium,
+					TextColor3 = THEME.Text,
+					TextSize = 10,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+				local bar = textButton({
+					AnchorPoint = Vector2.new(0, 0.5),
+					BackgroundColor3 = Color3.fromRGB(52, 53, 56),
+					Position = UDim2.fromOffset(10, 36),
+					Size = UDim2.new(1, -20, 0, 5),
+					Text = "",
+					Parent = row,
+				})
+				addCorner(bar, 8)
+				local fill = create("Frame", {
+					BackgroundColor3 = THEME.ToggleOn,
+					BorderSizePixel = 0,
+					Size = UDim2.fromScale((value - minimum) / math.max(1, maximum - minimum), 1),
+					Parent = bar,
+				})
+				addCorner(fill, 8)
+				local control = {}
+				function control:Set(newValue, silent)
+					newValue = math.clamp(newValue, minimum, maximum)
+					if sliderConfig.Round ~= false then
+						newValue = math.floor(newValue + 0.5)
+					end
+					value = newValue
+					label.Text = string.format("%s   %s", sliderConfig.Title or "Slider", tostring(value))
+					fill.Size = UDim2.fromScale((value - minimum) / math.max(1, maximum - minimum), 1)
+					if not silent then
+						callback(sliderConfig.Callback, value)
+					end
+				end
+				function control:Get()
+					return value
+				end
+				local sliding = false
+				local function setFromInput(input)
+					local alpha = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+					control:Set(minimum + (maximum - minimum) * alpha)
+				end
+				connect(self._window, bar.InputBegan, function(input)
+					if
+						input.UserInputType == Enum.UserInputType.MouseButton1
+						or input.UserInputType == Enum.UserInputType.Touch
+					then
+						sliding = true
+						setFromInput(input)
+					end
+				end)
+				connect(self._window, UserInputService.InputChanged, function(input)
+					if
+						sliding
+						and (
+							input.UserInputType == Enum.UserInputType.MouseMovement
+							or input.UserInputType == Enum.UserInputType.Touch
+						)
+					then
+						setFromInput(input)
+					end
+				end)
+				connect(self._window, UserInputService.InputEnded, function(input)
+					if
+						input.UserInputType == Enum.UserInputType.MouseButton1
+						or input.UserInputType == Enum.UserInputType.Touch
+					then
+						sliding = false
+					end
+				end)
+				control:Set(value, true)
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddLabel(labelConfig)
+				if type(labelConfig) == "string" then
+					labelConfig = { Text = labelConfig }
+				end
+				labelConfig = labelConfig or {}
+				local row = create("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 34),
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				local label = textLabel({
+					Position = UDim2.fromOffset(10, 1),
+					Size = UDim2.new(1, -20, 1, -1),
+					Text = labelConfig.Text or "Label",
+					TextColor3 = THEME.TextDim,
+					TextSize = 10,
+					TextWrapped = true,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+				local control = {}
+				function control:Set(text)
+					label.Text = tostring(text)
+				end
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			section.Frame = sectionFrame
+			table.insert(self._sections, section)
+			refreshSection()
+			return section
+		end
+
+		if #self._tabs == 1 then
+			self:SelectTab(tab)
+		end
+		return tab
+	end
+
+	function window:Destroy()
+		for _, connection in ipairs(self._connections) do
+			if connection.Connected then
+				connection:Disconnect()
+			end
+		end
+		table.clear(self._connections)
+		if gui then
+			gui:Destroy()
+		end
+	end
+
+	local launcherLastClick = -math.huge
+	local headerLastClick = -math.huge
+	local function pointInside(guiObject, position)
+		local corner = guiObject.AbsolutePosition
+		local size = guiObject.AbsoluteSize
+		local function contains(x, y)
+			return x >= corner.X and x <= corner.X + size.X
+				and y >= corner.Y and y <= corner.Y + size.Y
+		end
+		if contains(position.X, position.Y) then
+			return true
+		end
+		local inset = GuiService:GetGuiInset()
+		return contains(position.X - inset.X, position.Y - inset.Y)
+	end
+	local function registerDoubleClick(useLauncher)
+		local now = os.clock()
+		local lastClick = useLauncher and launcherLastClick or headerLastClick
+		if now - lastClick <= 0.55 then
+			if useLauncher then
+				launcherLastClick = -math.huge
+			else
+				headerLastClick = -math.huge
+			end
+			window:SetVisible(not window._visible)
+		elseif useLauncher then
+			launcherLastClick = now
+		else
+			headerLastClick = now
+		end
+	end
+	connect(window, UserInputService.InputBegan, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch
+		then
+			return
+		end
+		if launcher.Visible and pointInside(launcher, input.Position) then
+			registerDoubleClick(true)
+		elseif main.Visible and pointInside(expandButton, input.Position) then
+			registerDoubleClick(false)
+		end
+	end)
+	connect(window, searchButton.MouseButton1Click, function()
+		searchBox.Visible = not searchBox.Visible
+		if searchBox.Visible then
+			searchBox:CaptureFocus()
+		else
+			searchBox.Text = ""
+		end
+	end)
+	connect(window, searchBox:GetPropertyChangedSignal("Text"), function()
+		local query = string.lower(searchBox.Text)
+		for _, tab in ipairs(window._tabs) do
+			tab._button.Visible = query == "" or string.find(string.lower(tab.Title), query, 1, true) ~= nil
+		end
+	end)
+	connect(window, UserInputService.InputBegan, function(input)
+		if not window._capturingKey and input.KeyCode == window._toggleKey then
+			window:Toggle()
+		end
+	end)
+
+	makeDraggable(window, header, main)
+	return window
+end
+
+function Clear:Demo(options)
+	options = options or {}
+	options.Title = options.Title or "Clear"
+	if options.StartOpen == nil then
+		options.StartOpen = true
+	end
+	local window = self:CreateWindow(options)
+	local tabs = {
+		window:AddTab({ Title = "Combat", Icon = "Combat" }),
+		window:AddTab({ Title = "Detections", Icon = "Detections" }),
+		window:AddTab({ Title = "Visuals", Icon = "Visuals" }),
+		window:AddTab({ Title = "Player", Icon = "Player" }),
+		window:AddTab({ Title = "Sword", Icon = "Sword" }),
+		window:AddTab({ Title = "Avatar", Icon = "Avatar" }),
+		window:AddTab({ Title = "World", Icon = "World" }),
+		window:AddTab({ Title = "Blatant", Icon = "Blatant" }),
+		window:AddTab({ Title = "Misc", Icon = "Misc" }),
+		window:AddTab({ Title = "GUI", Icon = "GUI" }),
+	}
+
+	local skybox = tabs[7]:AddSection({
+		Title = "Custom Skybox",
+		Description = "change the world skybox",
+		Locked = true,
+	})
+	skybox:AddToggle({
+		Badge = "None",
+		Default = true,
+		Callback = options.OnSkyboxToggle,
+	})
+	skybox:AddDropdown({
+		Title = "Skybox Theme",
+		Options = {
+			"Default",
+			"Minecraft",
+			"PurpleDay",
+			"RedNight",
+			"Trollge",
+			"Night",
+			"Space",
+			"VibeMorning",
+			"VibeNight",
+			"PurpleSplash",
+		},
+		Default = "RedNight",
+		Open = true,
+		Callback = options.OnSkyboxChanged,
+	})
+
+	window:SelectTab(tabs[7])
+	return window
+end
+
+-- SharkBite 2 controls using the Clear library above.
+do
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+	local UserInputService = game:GetService("UserInputService")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+	local player = Players.LocalPlayer
+	local env = (getgenv and getgenv()) or _G
+	local previous = env.__CodexSharkBoost
+	local retainedMenuKey = previous and previous.menuKey or Enum.KeyCode.LeftAlt
+	if previous and type(previous.destroy) == "function" then
+		pcall(previous.destroy, true)
+	end
+
+	local previousGui = player.PlayerGui:FindFirstChild("CodexSharkBoost")
+	if previousGui then
+		previousGui:Destroy()
+	end
+
+	local playerScripts = player:WaitForChild("PlayerScripts")
+	local weaponRoot = playerScripts:WaitForChild("ProjectilesClient"):WaitForChild("WeaponScript")
+	local projectileStats = require(ReplicatedStorage.Projectiles.ProjectileStatsModule).get()
+	local bulletCount = require(weaponRoot:WaitForChild("BulletCountModule"))
+	local hitScan = require(weaponRoot:WaitForChild("HitScanFire"))
+	local projectileFire = require(weaponRoot:WaitForChild("ProjectileFire"))
+	local commonWeapon = require(weaponRoot:WaitForChild("CommonWeaponFunctions"))
+	local rayProjectileRender = require(ReplicatedStorage.Projectiles.RayProjectileRenderModule)
+
+	local state = {
+		alive = true,
+		uiStyle = "Clear",
+		version = "Clear-14",
+		menuKey = retainedMenuKey,
+		unlimitedAmmo = true,
+		rapidFire = true,
+		holdToFire = true,
+		multiBullet = true,
+		noReload = true,
+		noSpread = true,
+		noRecoil = true,
+		bulletSpeedEnabled = true,
+		sharkAccuracy = true,
+		damageBurst = true,
+		sharkESP = true,
+		sharkLines = true,
+		playerESP = true,
+		boatBoost = true,
+		autoRide = true,
+		fireRate = 60,
+		bulletsPerShot = 5,
+		bulletSpeed = 10000,
+		burstShots = 6,
+		aimRadius = 300,
+		boatMultiplier = 3,
+		selectedBoat = nil,
+		requestedBoat = nil,
+		catalogCount = 0,
+		holdingFire = false,
+		fireToken = 0,
+		rideToken = 0,
+		autoFireCalls = 0,
+		burstToken = 0,
+		connections = {},
+		originals = setmetatable({}, { __mode = "k" }),
+		boatOriginals = setmetatable({}, { __mode = "k" }),
+		highlights = setmetatable({}, { __mode = "k" }),
+		playerHighlights = setmetatable({}, { __mode = "k" }),
+		outlines = setmetatable({}, { __mode = "k" }),
+		sharkTargets = setmetatable({}, { __mode = "k" }),
+		lineFrames = setmetatable({}, { __mode = "k" }),
+	}
+	env.__CodexSharkBoost = state
+	state.originalRenderBulletArc = rayProjectileRender.RenderBulletArc
+	local wrappedRenderBulletArc = function(origin, target, speed, ...)
+		local visualSpeed = state.bulletSpeedEnabled and state.bulletSpeed or speed
+		return state.originalRenderBulletArc(origin, target, visualSpeed, ...)
+	end
+	rayProjectileRender.RenderBulletArc = wrappedRenderBulletArc
+
+	local featureKeys = {
+		"unlimitedAmmo",
+		"rapidFire",
+		"holdToFire",
+		"multiBullet",
+		"noReload",
+		"noSpread",
+		"noRecoil",
+		"bulletSpeedEnabled",
+		"sharkAccuracy",
+		"damageBurst",
+		"sharkESP",
+		"sharkLines",
+		"playerESP",
+		"boatBoost",
+		"autoRide",
+	}
+
+	local function connect(signal, callbackFn)
+		local connection = signal:Connect(callbackFn)
+		table.insert(state.connections, connection)
+		return connection
+	end
+
+	local function normalize(value)
+		return string.lower((tostring(value):gsub("[^%w]", "")))
+	end
+
+	local function equippedWeapon()
+		local character = player.Character
+		if not character then
+			return nil
+		end
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Tool") and projectileStats[child.Name] then
+				return child
+			end
+		end
+		return nil
+	end
+
+	local function anyWeapon()
+		local tool = equippedWeapon()
+		if tool then
+			return tool
+		end
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		if backpack then
+			for _, child in ipairs(backpack:GetChildren()) do
+				if child:IsA("Tool") and projectileStats[child.Name] then
+					return child
+				end
+			end
+		end
+		return nil
+	end
+
+	local function rememberStats(stats)
+		local original = state.originals[stats]
+		if original then
+			return original
+		end
+		original = {
+			MagSize = stats.MagSize,
+			FireRate = stats.FireRate,
+			ReloadTime = stats.ReloadTime,
+			Spread = stats.Spread,
+			Recoil = stats.Recoil,
+			Mode = stats.Mode,
+			BulletAmount = stats.BulletAmount,
+			ProjectileSpeed = stats.ProjectileSpeed,
+			BulletSpeed = stats.BulletSpeed,
+			Gravity = stats.Gravity,
+		}
+		state.originals[stats] = original
+		return original
+	end
+
+	local function zeroLike(value)
+		if typeof(value) == "Vector3" then
+			return Vector3.zero
+		elseif typeof(value) == "Vector2" then
+			return Vector2.zero
+		elseif typeof(value) == "number" then
+			return 0
+		end
+		return value
+	end
+
+	local function applyWeaponStats()
+		for _, stats in pairs(projectileStats) do
+			if type(stats) == "table" then
+				local original = rememberStats(stats)
+				if original.MagSize ~= nil then
+					stats.MagSize = state.unlimitedAmmo and math.huge or original.MagSize
+				end
+				if original.FireRate ~= nil then
+					stats.FireRate = state.rapidFire and state.fireRate or original.FireRate
+				end
+				if original.ReloadTime ~= nil then
+					stats.ReloadTime = state.noReload and 0 or original.ReloadTime
+				end
+				if original.Spread ~= nil then
+					stats.Spread = state.noSpread and 0 or original.Spread
+				end
+				if original.Recoil ~= nil then
+					stats.Recoil = state.noRecoil and zeroLike(original.Recoil) or original.Recoil
+				end
+				stats.Mode = original.Mode
+				if original.Mode == 3 and original.BulletAmount ~= nil then
+					stats.BulletAmount = state.multiBullet and state.bulletsPerShot or original.BulletAmount
+				else
+					stats.BulletAmount = original.BulletAmount
+				end
+				if original.ProjectileSpeed ~= nil then
+					stats.ProjectileSpeed = original.ProjectileSpeed
+				end
+				if original.BulletSpeed ~= nil then
+					stats.BulletSpeed = state.bulletSpeedEnabled and state.bulletSpeed or original.BulletSpeed
+				end
+				if original.Gravity ~= nil then
+					stats.Gravity = original.Gravity
+				end
+			end
+		end
+	end
+
+	local lastAmmoWeapon
+	local function refreshAmmo(force)
+		local tool = anyWeapon()
+		if state.unlimitedAmmo then
+			if tool and (force or tool ~= lastAmmoWeapon) then
+				pcall(bulletCount.ChangeWeapon, tool)
+				lastAmmoWeapon = tool
+			end
+		elseif force then
+			pcall(bulletCount.resetWeapons)
+			if tool then
+				pcall(bulletCount.ChangeWeapon, tool)
+			end
+			lastAmmoWeapon = tool
+		end
+	end
+
+	local function directFire(tool, inputObject)
+		if not tool or tool.Parent ~= player.Character then
+			return false
+		end
+		local stats = projectileStats[tool.Name]
+		if not stats then
+			return false
+		end
+		state.autoFireCalls += 1
+		local original = state.originals[stats] or rememberStats(stats)
+		local baseMode = original.Mode or stats.Mode
+		if baseMode == 5 then
+			pcall(projectileFire.fire, tool, inputObject, false)
+		elseif baseMode == 101 then
+			pcall(projectileFire.fireFlare, tool)
+		elseif baseMode == 102 then
+			pcall(projectileFire.fireBait, tool)
+		elseif baseMode == 103 then
+			pcall(projectileFire.fireTurtle, tool)
+		else
+			pcall(hitScan.Fire, tool, inputObject, false)
+		end
+		return true
+	end
+	state.directFireOnce = function()
+		return directFire(equippedWeapon(), nil)
+	end
+
+	local function fireDamageBurst(tool, inputObject)
+		if not state.damageBurst or not tool then
+			return
+		end
+		local stats = projectileStats[tool.Name]
+		local original = stats and rememberStats(stats)
+		local nativeFireRate = original and tonumber(original.FireRate) or 1
+		local nativeInterval = 1 / math.max(nativeFireRate, 0.01)
+		state.burstToken += 1
+		local token = state.burstToken
+		task.spawn(function()
+			for _ = 1, state.burstShots do
+				if not state.alive or not state.damageBurst or token ~= state.burstToken then
+					return
+				end
+				directFire(tool, inputObject)
+				task.wait(nativeInterval)
+			end
+		end)
+	end
+	state.fireDamageBurst = function()
+		return fireDamageBurst(equippedWeapon(), nil)
+	end
+
+	local function getSharkVisual(shark)
+		local sharkMain = shark and shark:FindFirstChild("SharkMain")
+		local mesh = sharkMain and sharkMain:FindFirstChild("Mesh")
+		local visual = mesh and mesh:FindFirstChild("Shark")
+		if visual and visual:IsA("BasePart") then
+			return visual
+		end
+		return nil
+	end
+
+	local function nearestSharkToCursor()
+		local sharks = workspace:FindFirstChild("Sharks")
+		local camera = workspace.CurrentCamera
+		if not sharks or not camera then
+			return nil
+		end
+		local mousePosition = UserInputService:GetMouseLocation()
+		local bestVisual
+		local bestDistance = state.aimRadius
+		for _, shark in ipairs(sharks:GetChildren()) do
+			local visual = getSharkVisual(shark)
+			if visual then
+				-- GetMouseLocation is in screen space (including Roblox's top inset),
+				-- so use WorldToScreenPoint here to prevent a vertical aim offset.
+				local point, onScreen = camera:WorldToScreenPoint(visual.Position)
+				if onScreen and point.Z > 0 then
+					local distance = (Vector2.new(point.X, point.Y) - mousePosition).Magnitude
+					if distance <= bestDistance then
+						bestDistance = distance
+						bestVisual = visual
+					end
+				end
+			end
+		end
+		return bestVisual
+	end
+
+	state.originalRaycastFromCamera = commonWeapon.raycastFromCamera
+	state.originalRaycastFromWeapon = commonWeapon.raycastFromWeapon
+	local wrappedRaycastFromCamera = function(...)
+		if state.alive and state.sharkAccuracy and equippedWeapon() then
+			local target = nearestSharkToCursor()
+			if target then
+				return target, target.Position, Vector3.yAxis
+			end
+		end
+		return state.originalRaycastFromCamera(...)
+	end
+	local wrappedRaycastFromWeapon = function(tool, aimPosition)
+		if state.alive and state.sharkAccuracy and tool and tool.Parent == player.Character then
+			local target = nearestSharkToCursor()
+			if target then
+				return target, target.Position
+			end
+		end
+		return state.originalRaycastFromWeapon(tool, aimPosition)
+	end
+	commonWeapon.raycastFromCamera = wrappedRaycastFromCamera
+	commonWeapon.raycastFromWeapon = wrappedRaycastFromWeapon
+
+	local function applyOneSharkVisual(shark)
+		local visual = getSharkVisual(shark)
+		if not visual then
+			return false
+		end
+
+		local oldHighlight = shark:FindFirstChild("CodexRedSharkHighlight")
+		if oldHighlight then
+			oldHighlight:Destroy()
+		end
+		local highlight = visual:FindFirstChild("ClearRedSharkHighlight")
+		if not highlight then
+			highlight = Instance.new("Highlight")
+			highlight.Name = "ClearRedSharkHighlight"
+			highlight.Parent = visual
+		end
+		highlight.Adornee = visual
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		highlight.FillColor = Color3.fromRGB(255, 0, 0)
+		highlight.FillTransparency = 0
+		highlight.OutlineColor = Color3.fromRGB(255, 70, 70)
+		highlight.OutlineTransparency = 0
+		highlight.Enabled = state.sharkESP
+
+		local outline = visual:FindFirstChild("ClearRedSharkOutline")
+		if not outline then
+			outline = Instance.new("SelectionBox")
+			outline.Name = "ClearRedSharkOutline"
+			outline.Parent = visual
+		end
+		outline.Adornee = visual
+		outline.Color3 = Color3.fromRGB(255, 0, 0)
+		outline.SurfaceColor3 = Color3.fromRGB(255, 0, 0)
+		outline.SurfaceTransparency = 0.72
+		outline.LineThickness = 0.08
+		outline.Visible = state.sharkESP
+
+		state.sharkTargets[shark] = visual
+		state.highlights[shark] = highlight
+		state.outlines[shark] = outline
+		return true
+	end
+
+	local function ensureHighlight(shark)
+		if not shark:IsA("Model") then
+			return
+		end
+		if applyOneSharkVisual(shark) then
+			return
+		end
+		connect(shark.DescendantAdded, function(descendant)
+			if descendant.Name == "Shark" or descendant.Name == "Mesh" or descendant.Name == "SharkMain" then
+				task.defer(applyOneSharkVisual, shark)
+			end
+		end)
+		task.spawn(function()
+			while state.alive and shark.Parent and not state.sharkTargets[shark] do
+				if applyOneSharkVisual(shark) then
+					return
+				end
+				task.wait(0.2)
+			end
+		end)
+	end
+
+	local function applyHighlights()
+		for shark, highlight in pairs(state.highlights) do
+			if shark and shark.Parent and highlight and highlight.Parent then
+				highlight.Enabled = state.sharkESP
+			end
+		end
+		for shark, outline in pairs(state.outlines) do
+			if shark and shark.Parent and outline and outline.Parent then
+				outline.Visible = state.sharkESP
+			end
+		end
+	end
+
+	local function applyPlayerHighlight(targetPlayer)
+		if targetPlayer == player then
+			return
+		end
+		local character = targetPlayer.Character
+		local highlight = state.playerHighlights[targetPlayer]
+		if highlight and not highlight.Parent then
+			highlight = nil
+			state.playerHighlights[targetPlayer] = nil
+		end
+		if not character then
+			if highlight then
+				highlight.Enabled = false
+			end
+			return
+		end
+		if not highlight then
+			highlight = Instance.new("Highlight")
+			highlight.Name = "ClearWhitePlayerHighlight"
+			highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			highlight.FillColor = Color3.fromRGB(255, 255, 255)
+			highlight.FillTransparency = 0.28
+			highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+			highlight.OutlineTransparency = 0
+			highlight.Parent = character
+			state.playerHighlights[targetPlayer] = highlight
+		end
+		highlight.Adornee = character
+		highlight.Enabled = state.playerESP
+	end
+
+	local function applyPlayerHighlights()
+		for _, targetPlayer in ipairs(Players:GetPlayers()) do
+			applyPlayerHighlight(targetPlayer)
+		end
+	end
+
+	local function bindPlayerHighlight(targetPlayer)
+		if targetPlayer == player then
+			return
+		end
+		applyPlayerHighlight(targetPlayer)
+		connect(targetPlayer.CharacterAdded, function()
+			task.defer(applyPlayerHighlight, targetPlayer)
+		end)
+	end
+
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		bindPlayerHighlight(targetPlayer)
+	end
+	connect(Players.PlayerAdded, bindPlayerHighlight)
+	connect(Players.PlayerRemoving, function(targetPlayer)
+		local highlight = state.playerHighlights[targetPlayer]
+		if highlight then
+			highlight:Destroy()
+		end
+		state.playerHighlights[targetPlayer] = nil
+	end)
+
+	local function bindSharks(folder)
+		for _, shark in ipairs(folder:GetChildren()) do
+			ensureHighlight(shark)
+		end
+		connect(folder.ChildAdded, ensureHighlight)
+		connect(folder.ChildRemoved, function(shark)
+			state.sharkTargets[shark] = nil
+			local line = state.lineFrames[shark]
+			if line then
+				line:Destroy()
+				state.lineFrames[shark] = nil
+			end
+		end)
+	end
+	local sharksFolder = workspace:FindFirstChild("Sharks")
+	if sharksFolder then
+		bindSharks(sharksFolder)
+	else
+		connect(workspace.ChildAdded, function(child)
+			if child.Name == "Sharks" then
+				bindSharks(child)
+			end
+		end)
+	end
+
+	local function getOwnedBoat(preferredName)
+		local boats = workspace:FindFirstChild("Boats")
+		if not boats then
+			return nil
+		end
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local preferred = preferredName and normalize(preferredName)
+		local fallback
+		for _, boat in ipairs(boats:GetChildren()) do
+			local seats = boat:FindFirstChild("Seats")
+			local vehicleSeat = seats and seats:FindFirstChild("VehicleSeat")
+			if vehicleSeat then
+				local isOwner = vehicleSeat:GetAttribute("NetworkOwnerName") == player.Name
+				local isDriving = humanoid and vehicleSeat.Occupant == humanoid
+				if isOwner or isDriving then
+					fallback = fallback or boat
+					if preferred and normalize(boat.Name) == preferred then
+						return boat
+					end
+				end
+			end
+		end
+		return fallback
+	end
+
+	local function restoreBoatSpeed()
+		for valueObject, original in pairs(state.boatOriginals) do
+			if valueObject and valueObject.Parent then
+				pcall(function()
+					valueObject.Value = original
+				end)
+			end
+		end
+	end
+
+	local function applyBoatBoost()
+		local boat = getOwnedBoat(state.selectedBoat)
+		if not boat then
+			return nil
+		end
+		local configuration = boat:FindFirstChild("Configuration")
+		local engine = configuration and configuration:FindFirstChild("Engine")
+		local maxSpeed = engine and engine:FindFirstChild("MaxSpeed")
+		if maxSpeed and maxSpeed:IsA("ValueBase") then
+			if state.boatOriginals[maxSpeed] == nil then
+				state.boatOriginals[maxSpeed] = maxSpeed.Value
+			end
+			local original = state.boatOriginals[maxSpeed]
+			maxSpeed.Value = state.boatBoost and original * state.boatMultiplier or original
+		end
+		return boat
+	end
+
+	local function tryRideBoat(boat)
+		if not state.autoRide or not boat then
+			return false
+		end
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local seats = boat:FindFirstChild("Seats")
+		local vehicleSeat = seats and seats:FindFirstChild("VehicleSeat")
+		if not humanoid or not root or not vehicleSeat then
+			return false
+		end
+		if vehicleSeat.Occupant == humanoid then
+			return true
+		end
+		root.CFrame = vehicleSeat.CFrame * CFrame.new(0, 3, 0)
+		task.wait(0.1)
+		vehicleSeat:Sit(humanoid)
+		return true
+	end
+
+	local function scheduleRide()
+		state.rideToken += 1
+		local token = state.rideToken
+		task.spawn(function()
+			for _ = 1, 24 do
+				if not state.alive or not state.autoRide or token ~= state.rideToken then
+					return
+				end
+				if tryRideBoat(getOwnedBoat(state.selectedBoat)) then
+					return
+				end
+				task.wait(0.5)
+			end
+		end)
+	end
+
+	local window = Clear:CreateWindow({
+		Title = "Clear",
+		StartOpen = true,
+		ToggleKey = state.menuKey,
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(748, 480),
+		Parent = player.PlayerGui,
+		GuiName = "CodexSharkBoost",
+		DisplayOrder = 999,
+		LauncherAnchorPoint = Vector2.new(0.5, 0.5),
+		LauncherPosition = UDim2.fromScale(0.5, 0.5),
+	})
+	state.window = window
+	state.gui = window.Gui
+	local lineGui = Instance.new("ScreenGui")
+	lineGui.Name = "ClearSharkLines"
+	lineGui.DisplayOrder = 998
+	lineGui.IgnoreGuiInset = true
+	lineGui.ResetOnSpawn = false
+	lineGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	lineGui.Parent = player.PlayerGui
+	state.lineGui = lineGui
+
+	local tabs = {
+		Weapons = window:AddTab({ Title = "Weapons", Icon = "Combat" }),
+		SharkESP = window:AddTab({ Title = "Shark", Icon = "Visuals" }),
+		BoatBoost = window:AddTab({ Title = "Boat Boost", Icon = "World" }),
+		Settings = window:AddTab({ Title = "Settings", Icon = "GUI" }),
+	}
+
+	local masterSection = tabs.Weapons:AddSection({
+		Title = "Shark Booster Master",
+		Description = "toggle every enhancement together",
+	})
+	local weaponSection = tabs.Weapons:AddSection({
+		Title = "Weapon Enhancements",
+		Description = "automatic fire and weapon control",
+	})
+	local fireSection = tabs.Weapons:AddSection({
+		Title = "Fire Settings",
+		Description = "set fire rate, bullet count, and bullet speed",
+	})
+	local visualSection = tabs.SharkESP:AddSection({
+		Title = "Shark & Player ESP",
+		Description = "red shark tracking and white player highlighting",
+	})
+	local boatSection = tabs.BoatBoost:AddSection({
+		Title = "Boat Movement",
+		Description = "boost and automatically ride your active boat",
+	})
+	local selectorSection = tabs.BoatBoost:AddSection({
+		Title = "Boat Selector",
+		Description = "all store boats, including locked entries",
+	})
+	local guiSection = tabs.Settings:AddSection({
+		Title = "Clear GUI",
+		Description = "LeftAlt toggles the window; click below to change it",
+	})
+
+	local controls = {}
+	local masterControl
+	local statusControl
+	local boatStatus
+	local boatDropdown
+
+	local function allFeaturesEnabled()
+		for _, key in ipairs(featureKeys) do
+			if not state[key] then
+				return false
+			end
+		end
+		return true
+	end
+
+	local function stopHoldFire()
+		state.holdingFire = false
+		state.fireToken += 1
+		pcall(hitScan.Stop)
+	end
+
+	local syncControls = function()
+		for key, control in pairs(controls) do
+			control:Set(state[key], true)
+		end
+		if masterControl then
+			masterControl:Set(allFeaturesEnabled(), true)
+		end
+	end
+
+	local function applyAll(forceAmmo)
+		applyWeaponStats()
+		refreshAmmo(forceAmmo)
+		applyHighlights()
+		applyPlayerHighlights()
+		if state.boatBoost then
+			applyBoatBoost()
+		else
+			restoreBoatSpeed()
+		end
+		syncControls()
+	end
+	state.applyAll = applyAll
+
+	local function setFeature(key, enabled)
+		state[key] = enabled
+		if key == "holdToFire" and not enabled then
+			stopHoldFire()
+		end
+		applyAll(true)
+		if key == "autoRide" and enabled then
+			scheduleRide()
+		end
+	end
+
+	masterControl = masterSection:AddToggle({
+		Title = "Toggle All",
+		Badge = "ALL",
+		Default = true,
+		Callback = function(enabled)
+			for _, key in ipairs(featureKeys) do
+				state[key] = enabled
+			end
+			if not enabled then
+				stopHoldFire()
+			end
+			applyAll(true)
+			if enabled then
+				scheduleRide()
+			end
+		end,
+	})
+
+	local function addFeatureToggle(section, key, title, badge)
+		controls[key] = section:AddToggle({
+			Title = title,
+			Badge = badge,
+			Default = state[key],
+			Callback = function(enabled)
+				setFeature(key, enabled)
+			end,
+		})
+	end
+
+	addFeatureToggle(weaponSection, "unlimitedAmmo", "Unlimited Ammo", "INF")
+	addFeatureToggle(weaponSection, "rapidFire", "Fire Rate", "CPS")
+	addFeatureToggle(weaponSection, "holdToFire", "Hold to Fire", "AUTO")
+	addFeatureToggle(weaponSection, "multiBullet", "Bullet Amount", "MULTI")
+	addFeatureToggle(weaponSection, "noReload", "No Reload", "ZERO")
+	addFeatureToggle(weaponSection, "noSpread", "No Spread", "ZERO")
+	addFeatureToggle(weaponSection, "noRecoil", "No Recoil", "ZERO")
+	addFeatureToggle(weaponSection, "bulletSpeedEnabled", "Bullet Speed", "SPEED")
+	addFeatureToggle(weaponSection, "sharkAccuracy", "Shark Accuracy", "AIM")
+	addFeatureToggle(weaponSection, "damageBurst", "Damage Burst", "MULTI")
+
+	fireSection:AddSlider({
+		Title = "Fire Rate",
+		Min = 1,
+		Max = 120,
+		Default = state.fireRate,
+		Round = true,
+		Callback = function(value)
+			state.fireRate = value
+			applyWeaponStats()
+		end,
+	})
+	fireSection:AddSlider({
+		Title = "Bullets per Shot",
+		Min = 1,
+		Max = 25,
+		Default = state.bulletsPerShot,
+		Round = true,
+		Callback = function(value)
+			state.bulletsPerShot = value
+			applyWeaponStats()
+		end,
+	})
+	fireSection:AddSlider({
+		Title = "Bullet Speed",
+		Min = 100,
+		Max = 1000000,
+		Default = state.bulletSpeed,
+		Round = true,
+		Callback = function(value)
+			state.bulletSpeed = value
+			applyWeaponStats()
+		end,
+	})
+	fireSection:AddSlider({
+		Title = "Burst Shots",
+		Min = 1,
+		Max = 6,
+		Default = state.burstShots,
+		Round = true,
+		Callback = function(value)
+			state.burstShots = value
+		end,
+	})
+	fireSection:AddSlider({
+		Title = "Accuracy Radius",
+		Min = 25,
+		Max = 300,
+		Default = state.aimRadius,
+		Round = true,
+		Callback = function(value)
+			state.aimRadius = value
+		end,
+	})
+	statusControl = fireSection:AddLabel({ Text = "Weapon: waiting" })
+
+	addFeatureToggle(visualSection, "sharkESP", "Highlight Shark Red", "NO LAG")
+	addFeatureToggle(visualSection, "sharkLines", "Shark Tracer Line", "RED LINE")
+	addFeatureToggle(visualSection, "playerESP", "Highlight All Players White", "WHITE")
+	visualSection:AddLabel({ Text = "Highlights update only when sharks spawn or the toggle changes." })
+
+	addFeatureToggle(boatSection, "boatBoost", "Boat Speed", "BOOST")
+	addFeatureToggle(boatSection, "autoRide", "Auto Ride", "SEAT")
+	boatSection:AddSlider({
+		Title = "Boat Speed Multiplier",
+		Min = 1,
+		Max = 8,
+		Default = state.boatMultiplier,
+		Round = true,
+		Callback = function(value)
+			state.boatMultiplier = value
+			applyBoatBoost()
+		end,
+	})
+	boatStatus = boatSection:AddLabel({ Text = "Boat: waiting" })
+
+	local boatEntriesByLabel = {}
+	boatDropdown = selectorSection:AddDropdown({
+		Title = "All Boats",
+		Options = { "Loading boat catalog..." },
+		Default = "Loading boat catalog...",
+		Open = true,
+		Callback = function(label)
+			local entry = boatEntriesByLabel[label]
+			if not entry then
+				return
+			end
+			state.requestedBoat = entry.display
+			state.selectedBoat = entry.display
+			if boatStatus then
+				boatStatus:Set("Boat: requesting " .. entry.display)
+			end
+			if type(state.equipBoat) == "function" then
+				local ok = pcall(state.equipBoat, entry.id)
+				if not ok and boatStatus then
+					boatStatus:Set("Boat: equip callback failed")
+				end
+			else
+				boatStatus:Set("Boat: equip callback unavailable")
+			end
+			scheduleRide()
+			task.delay(0.9, function()
+				if not state.alive then
+					return
+				end
+				local spawned = getOwnedBoat(entry.display)
+				if spawned then
+					boatStatus:Set("Boat: " .. spawned.Name .. " equipped")
+				else
+					boatStatus:Set(entry.owned and "Boat: waiting to spawn" or "Boat: server locked")
+				end
+			end)
+		end,
+	})
+	selectorSection:AddLabel({ Text = "Every boat is listed. Locked boats are requested too, but the server decides ownership." })
+	local keybindButton
+	local waitingForMenuKey = false
+	keybindButton = guiSection:AddButton({
+		Title = "Menu Keybind: " .. state.menuKey.Name,
+		Callback = function()
+			waitingForMenuKey = true
+			window:SetKeyCapture(true)
+			keybindButton.Instance.Text = "Press any keyboard key..."
+		end,
+	})
+	connect(UserInputService.InputBegan, function(input)
+		if not waitingForMenuKey or input.UserInputType ~= Enum.UserInputType.Keyboard then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Unknown then
+			return
+		end
+		waitingForMenuKey = false
+		state.menuKey = input.KeyCode
+		window:SetToggleKey(input.KeyCode)
+		window:SetKeyCapture(false)
+		keybindButton.Instance.Text = "Menu Keybind: " .. input.KeyCode.Name
+	end)
+	guiSection:AddLabel({ Text = "Press LeftAlt by default. Click the keybind button and press any key to replace it." })
+
+	local function firstLuaCallback(signal)
+		if type(getconnections) ~= "function" then
+			return nil
+		end
+		for _, connection in ipairs(getconnections(signal)) do
+			if type(connection.Function) == "function" then
+				return connection.Function
+			end
+		end
+		return nil
+	end
+
+	local function buildBoatCatalog()
+		local catalog = {}
+		local ownedNames = {}
+		local inventoryManager = require(playerScripts:WaitForChild("Inventory"):WaitForChild("InventoryManager"))
+		local storeModuleFolder = playerScripts:WaitForChild("Store"):WaitForChild("StoreModule")
+		local equipModule = require(storeModuleFolder:WaitForChild("EquipModule"))
+		local boatAssets = inventoryManager.getBoatAssets()
+		for key, data in pairs(boatAssets) do
+			if type(data) == "table" and data.isBoat then
+				table.insert(catalog, {
+					display = data.name or key,
+					key = key,
+					id = data.id,
+					owned = data.owned == true,
+					equipped = data.equipped == true,
+				})
+			end
+		end
+		state.equipBoat = function(id)
+			return equipModule.equip("Boats", id)
+		end
+
+		if false then
+		local boatSelection = player.PlayerGui:WaitForChild("BoatSelection", 20)
+		local selectionFrame = boatSelection and boatSelection:FindFirstChild("Frame")
+		local selectionRoot = selectionFrame and selectionFrame:FindFirstChild("BoatSelectionFrame")
+		local playerBoats = selectionRoot and selectionRoot:FindFirstChild("PlayerBoatsSelection")
+		local ownedContainer = playerBoats and playerBoats:FindFirstChild("BoatsContainer")
+		if ownedContainer then
+			for _, item in ipairs(ownedContainer:GetChildren()) do
+				if item:IsA("Frame") and item.Visible then
+					local label = item:FindFirstChild("BoatName")
+					if label and label:IsA("TextLabel") then
+						ownedNames[normalize(label.Text)] = true
+					end
+				end
+			end
+		end
+
+		local store = player.PlayerGui:WaitForChild("Store", 20)
+		local storeContainer = store and store:FindFirstChild("StoreContainer")
+		local mainFrame = storeContainer and storeContainer:FindFirstChild("MainFrame")
+		local itemsFrame = mainFrame and mainFrame:FindFirstChild("ItemsFrame")
+		local details = mainFrame and mainFrame:FindFirstChild("DetailsFrame")
+		local bottom = details and details:FindFirstChild("Bottom")
+		local purchaseFrame = bottom and bottom:FindFirstChild("PurchaseFrame")
+		local equipButton = purchaseFrame and purchaseFrame:FindFirstChild("EquipButton")
+		local navBar = mainFrame and mainFrame:FindFirstChild("NavBar")
+		local boatsButton = navBar and navBar:FindFirstChild("Boats")
+		if boatsButton and type(firesignal) == "function" then
+			pcall(firesignal, boatsButton.Activated)
+			task.wait(0.6)
+		end
+
+		if equipButton and type(getupvalues) == "function" then
+			local outer = firstLuaCallback(equipButton.Activated)
+			local upvalues = outer and getupvalues(outer)
+			if upvalues then
+				for _, value in ipairs(upvalues) do
+					if type(value) == "table" and type(value.equip) == "function" then
+						state.equipBoat = value.equip
+						break
+					end
+				end
+			end
+		end
+
+		if itemsFrame and type(getupvalues) == "function" then
+			for _, frame in ipairs(itemsFrame:GetChildren()) do
+				if frame:IsA("Frame") and frame.Name ~= "Template" and frame.Name ~= "PremiumTemplate" then
+					local button = frame:FindFirstChild("Contents")
+					local callbackFn = button and firstLuaCallback(button.Activated)
+					local upvalues = callbackFn and getupvalues(callbackFn)
+					local key = upvalues and upvalues[2]
+					local category = upvalues and upvalues[3]
+					if type(key) == "string" and category == "Boats" then
+						table.insert(catalog, {
+							display = frame.Name,
+							key = key,
+							owned = ownedNames[normalize(frame.Name)] == true,
+						})
+					end
+				end
+			end
+		end
+
+		end
+
+		table.sort(catalog, function(a, b)
+			return a.display < b.display
+		end)
+		state.fullBoatCatalog = catalog
+		state.catalogCount = #catalog
+		local labels = {}
+		table.clear(boatEntriesByLabel)
+		for _, entry in ipairs(catalog) do
+			local label = (entry.owned and "[Owned] " or "[Locked] ") .. entry.display
+			boatEntriesByLabel[label] = entry
+			table.insert(labels, label)
+		end
+		if #labels == 0 then
+			labels = { "Boat catalog unavailable" }
+		end
+		boatDropdown:Refresh(labels, false)
+		boatStatus:Set(string.format("Boat: %d total / search and select", #catalog))
+	end
+	state.refreshBoatCatalog = buildBoatCatalog
+
+	local function pointerOverClear(position)
+		local main = window.Main
+		if main and main.Visible then
+			local at = main.AbsolutePosition
+			local size = main.AbsoluteSize
+			if position.X >= at.X and position.X <= at.X + size.X
+				and position.Y >= at.Y and position.Y <= at.Y + size.Y
+			then
+				return true
+			end
+		end
+		local launcher = window.Gui and window.Gui:FindFirstChild("Launcher")
+		if launcher and launcher.Visible then
+			local at = launcher.AbsolutePosition
+			local size = launcher.AbsoluteSize
+			return position.X >= at.X and position.X <= at.X + size.X
+				and position.Y >= at.Y and position.Y <= at.Y + size.Y
+		end
+		return false
+	end
+
+	connect(UserInputService.InputBegan, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+			return
+		end
+		if UserInputService:GetFocusedTextBox() or pointerOverClear(input.Position) then
+			return
+		end
+		local tool = equippedWeapon()
+		if not tool then
+			return
+		end
+		fireDamageBurst(tool, input)
+		if not state.holdToFire or state.holdingFire then
+			return
+		end
+		state.holdingFire = true
+		state.fireToken += 1
+		local token = state.fireToken
+		task.spawn(function()
+			local interval = math.max(1 / math.clamp(state.fireRate, 1, 120), 1 / 120) + 0.001
+			task.wait(interval)
+			while state.alive and state.holdToFire and state.holdingFire and token == state.fireToken do
+				local tool = equippedWeapon()
+				if not tool then
+					break
+				end
+				directFire(tool, input)
+				task.wait(interval)
+			end
+		end)
+	end)
+
+	connect(UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			stopHoldFire()
+		end
+	end)
+
+	local function getLine(shark)
+		local line = state.lineFrames[shark]
+		if line and line.Parent then
+			return line
+		end
+		line = Instance.new("Frame")
+		line.Name = "ClearRedSharkTracer"
+		line.AnchorPoint = Vector2.new(0.5, 0.5)
+		line.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+		line.BorderSizePixel = 0
+		line.ZIndex = 2
+		line.Visible = false
+		line.Parent = lineGui
+		local gradient = Instance.new("UIGradient")
+		gradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 0, 0)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 65, 65)),
+		})
+		gradient.Parent = line
+		state.lineFrames[shark] = line
+		return line
+	end
+
+	connect(RunService.RenderStepped, function()
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return
+		end
+		local viewport = camera.ViewportSize
+		local origin = Vector2.new(viewport.X * 0.5, viewport.Y - 2)
+		for shark, target in pairs(state.sharkTargets) do
+			local line = getLine(shark)
+			if state.sharkLines and shark.Parent and target and target.Parent then
+				local point, onScreen = camera:WorldToViewportPoint(target.Position)
+				if onScreen and point.Z > 0 then
+					local endpoint = Vector2.new(point.X, point.Y)
+					local delta = endpoint - origin
+					line.Position = UDim2.fromOffset((origin.X + endpoint.X) * 0.5, (origin.Y + endpoint.Y) * 0.5)
+					line.Size = UDim2.fromOffset(delta.Magnitude, 3)
+					line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+					line.Visible = true
+				else
+					line.Visible = false
+				end
+			else
+				line.Visible = false
+			end
+		end
+	end)
+
+	local boatsFolder = workspace:FindFirstChild("Boats")
+	if boatsFolder then
+		connect(boatsFolder.ChildAdded, function()
+			if state.autoRide then
+				task.delay(0.5, scheduleRide)
+			end
+		end)
+	end
+
+	local accumulator = 0
+	connect(RunService.Heartbeat, function(delta)
+		accumulator += delta
+		if accumulator < 0.2 then
+			return
+		end
+		accumulator = 0
+		applyWeaponStats()
+		refreshAmmo(false)
+		local boat = applyBoatBoost()
+		local tool = anyWeapon()
+		if statusControl then
+			statusControl:Set(string.format(
+				"Weapon: %s | %d CPS | %d bullets | speed %d",
+				tool and tool.Name or "waiting",
+				state.fireRate,
+				state.bulletsPerShot,
+				state.bulletSpeed
+			))
+		end
+		if boatStatus and boat then
+			boatStatus:Set(string.format("Boat: %s | x%d speed", boat.Name, state.boatMultiplier))
+		end
+	end)
+
+	function state.destroy(restore)
+		if not state.alive then
+			return
+		end
+		state.alive = false
+		stopHoldFire()
+		state.rideToken += 1
+		state.burstToken += 1
+		if rayProjectileRender.RenderBulletArc == wrappedRenderBulletArc then
+			rayProjectileRender.RenderBulletArc = state.originalRenderBulletArc
+		end
+		if commonWeapon.raycastFromCamera == wrappedRaycastFromCamera then
+			commonWeapon.raycastFromCamera = state.originalRaycastFromCamera
+		end
+		if commonWeapon.raycastFromWeapon == wrappedRaycastFromWeapon then
+			commonWeapon.raycastFromWeapon = state.originalRaycastFromWeapon
+		end
+
+		if restore ~= false then
+			for stats, original in pairs(state.originals) do
+				if stats then
+					stats.MagSize = original.MagSize
+					stats.FireRate = original.FireRate
+					stats.ReloadTime = original.ReloadTime
+					stats.Spread = original.Spread
+					stats.Recoil = original.Recoil
+					stats.Mode = original.Mode
+					stats.BulletAmount = original.BulletAmount
+					stats.ProjectileSpeed = original.ProjectileSpeed
+					stats.BulletSpeed = original.BulletSpeed
+					stats.Gravity = original.Gravity
+				end
+			end
+			restoreBoatSpeed()
+			pcall(bulletCount.resetWeapons)
+			local tool = anyWeapon()
+			if tool then
+				pcall(bulletCount.ChangeWeapon, tool)
+			end
+		end
+
+		for _, connection in ipairs(state.connections) do
+			pcall(function()
+				connection:Disconnect()
+			end)
+		end
+		for _, highlight in pairs(state.highlights) do
+			if highlight and highlight.Parent then
+				highlight:Destroy()
+			end
+		end
+		for _, highlight in pairs(state.playerHighlights) do
+			if highlight and highlight.Parent then
+				highlight:Destroy()
+			end
+		end
+		for _, outline in pairs(state.outlines) do
+			if outline and outline.Parent then
+				outline:Destroy()
+			end
+		end
+		if lineGui and lineGui.Parent then
+			lineGui:Destroy()
+		end
+		if window then
+			window:Destroy()
+		end
+		if env.__CodexSharkBoost == state then
+			env.__CodexSharkBoost = nil
+		end
+	end
+
+	local liveState = STATE
+	if liveState and type(liveState.onCleanup) == "function" then
+		liveState.onCleanup(function()
+			state.destroy(true)
+		end)
+	end
+
+	applyAll(true)
+	window:SelectTab(tabs.Weapons)
+	task.spawn(buildBoatCatalog)
+	scheduleRide()
+end
+
+return Clear
