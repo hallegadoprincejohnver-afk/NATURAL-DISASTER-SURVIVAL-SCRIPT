@@ -1,0 +1,5324 @@
+local Clear = (function()
+--[[
+	Clear UI Library
+	A close Roblox/Luau recreation of the supplied Clear screenshots.
+
+	QUICK START (ModuleScript):
+		local Clear = require(path.to.ClearUI)
+		local Window = Clear:Demo()
+
+	QUICK START (raw GitHub file):
+		local Clear = loadstring(game:HttpGet("YOUR_RAW_URL"))()
+		local Window = Clear:Demo()
+
+	CUSTOM WINDOW:
+		local Window = Clear:CreateWindow({
+			Title = "Clear",
+			StartOpen = true,
+			ToggleKey = Enum.KeyCode.LeftAlt,
+		})
+
+		local World = Window:AddTab({ Title = "World", Icon = "World" })
+		local Card = World:AddSection({
+			Title = "Custom Skybox",
+			Description = "change the world skybox",
+			Locked = true,
+		})
+
+		Card:AddToggle({ Badge = "None", Default = true, Callback = function(value) end })
+		Card:AddDropdown({
+			Title = "Skybox Theme",
+			Options = { "Default", "Minecraft", "PurpleDay", "RedNight" },
+			Default = "RedNight",
+			Open = true,
+			Callback = function(value) end,
+		})
+]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+
+local Clear = {}
+Clear.__index = Clear
+Clear.Version = "1.0.0-standalone"
+
+local THEME = {
+	Window = Color3.fromRGB(6, 7, 7),
+	HeaderTop = Color3.fromRGB(72, 73, 75),
+	HeaderMiddle = Color3.fromRGB(43, 44, 46),
+	HeaderBottom = Color3.fromRGB(8, 9, 10),
+	Card = Color3.fromRGB(17, 17, 18),
+	CardBorder = Color3.fromRGB(81, 82, 86),
+	Field = Color3.fromRGB(49, 49, 51),
+	FieldHover = Color3.fromRGB(57, 57, 60),
+	Divider = Color3.fromRGB(37, 38, 40),
+	Text = Color3.fromRGB(225, 225, 228),
+	TextMuted = Color3.fromRGB(111, 112, 116),
+	TextDim = Color3.fromRGB(139, 139, 144),
+	White = Color3.fromRGB(239, 239, 241),
+	ToggleOff = Color3.fromRGB(71, 72, 76),
+	ToggleOn = Color3.fromRGB(207, 208, 211),
+	Knob = Color3.fromRGB(50, 51, 54),
+	Badge = Color3.fromRGB(99, 100, 104),
+}
+
+local ICONS = {
+	Combat = "⚔",
+	Detections = "⬡",
+	Visuals = "◉",
+	Player = "♙",
+	Sword = "◇",
+	Avatar = "♧",
+	World = "◎",
+	Blatant = "♜",
+	Misc = "⚙",
+	GUI = "⚙",
+}
+
+local function create(className, properties, children)
+	local object = Instance.new(className)
+	for property, value in pairs(properties or {}) do
+		object[property] = value
+	end
+	for _, child in ipairs(children or {}) do
+		child.Parent = object
+	end
+	return object
+end
+
+local function addCorner(parent, radius)
+	return create("UICorner", { CornerRadius = UDim.new(0, radius), Parent = parent })
+end
+
+local function addStroke(parent, color, thickness, transparency)
+	return create("UIStroke", {
+		Color = color,
+		Thickness = thickness or 1,
+		Transparency = transparency or 0,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Parent = parent,
+	})
+end
+
+local function addPadding(parent, left, right, top, bottom)
+	return create("UIPadding", {
+		PaddingLeft = UDim.new(0, left or 0),
+		PaddingRight = UDim.new(0, right or 0),
+		PaddingTop = UDim.new(0, top or 0),
+		PaddingBottom = UDim.new(0, bottom or 0),
+		Parent = parent,
+	})
+end
+
+local function tween(object, time, properties)
+	local animation = TweenService:Create(
+		object,
+		TweenInfo.new(time or 0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		properties
+	)
+	animation:Play()
+	return animation
+end
+
+local function callback(fn, ...)
+	if type(fn) ~= "function" then
+		return
+	end
+	local args = table.pack(...)
+	task.spawn(function()
+		local ok, message = xpcall(function()
+			fn(table.unpack(args, 1, args.n))
+		end, debug.traceback)
+		if not ok then
+			warn("[Clear UI] callback error:\n" .. tostring(message))
+		end
+	end)
+end
+
+local function connect(window, signal, fn)
+	local connection = signal:Connect(fn)
+	table.insert(window._connections, connection)
+	return connection
+end
+
+local function textLabel(properties)
+	properties = properties or {}
+	properties.BackgroundTransparency = properties.BackgroundTransparency == nil and 1
+		or properties.BackgroundTransparency
+	properties.BorderSizePixel = 0
+	properties.Font = properties.Font or Enum.Font.Gotham
+	properties.TextColor3 = properties.TextColor3 or THEME.Text
+	properties.TextSize = properties.TextSize or 11
+	return create("TextLabel", properties)
+end
+
+local function textButton(properties)
+	properties = properties or {}
+	properties.AutoButtonColor = false
+	properties.BorderSizePixel = 0
+	properties.Font = properties.Font or Enum.Font.Gotham
+	properties.TextColor3 = properties.TextColor3 or THEME.Text
+	properties.TextSize = properties.TextSize or 11
+	return create("TextButton", properties)
+end
+
+local function makeBrandMark(parent, size, color, thickness)
+	local mark = create("Frame", {
+		Name = "BrandMark",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(size, size),
+		Parent = parent,
+	})
+	local length = math.floor(size * 0.35)
+	local width = thickness or 2
+	local pieces = {
+		{ 0, 0, length, width },
+		{ 0, 0, width, length },
+		{ size - length, 0, length, width },
+		{ size - width, 0, width, length },
+		{ 0, size - width, length, width },
+		{ 0, size - length, width, length },
+		{ size - length, size - width, length, width },
+		{ size - width, size - length, width, length },
+	}
+	for _, piece in ipairs(pieces) do
+		create("Frame", {
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(piece[1], piece[2]),
+			Size = UDim2.fromOffset(piece[3], piece[4]),
+			Parent = mark,
+		})
+	end
+	return mark
+end
+
+local function makeSearchIcon(parent, size, color)
+	local holder = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(size, size),
+		Parent = parent,
+	})
+	local circle = create("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(2, 2),
+		Size = UDim2.fromOffset(size - 7, size - 7),
+		Parent = holder,
+	})
+	addCorner(circle, 100)
+	addStroke(circle, color, 2, 0.1)
+	create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1, -2, 1, -1),
+		Rotation = 45,
+		Size = UDim2.fromOffset(2, math.max(4, math.floor(size * 0.35))),
+		Parent = holder,
+	})
+	return holder
+end
+
+local function makeLockIcon(parent, color)
+	local holder = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(14, 15),
+		Parent = parent,
+	})
+	local shackle = create("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(3, 1),
+		Size = UDim2.fromOffset(8, 8),
+		Parent = holder,
+	})
+	addCorner(shackle, 5)
+	addStroke(shackle, color, 1.5, 0.25)
+	local body = create("Frame", {
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.72,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(1, 7),
+		Size = UDim2.fromOffset(12, 8),
+		Parent = holder,
+	})
+	addCorner(body, 2)
+	addStroke(body, color, 1, 0.4)
+	return holder
+end
+
+-- Crisp, dependency-free sidebar glyphs. These are drawn from Frames/UIStrokes
+-- so the sidebar never falls back to single-letter placeholders or missing fonts.
+local function makeSidebarIcon(parent, iconName, color)
+	local holder = create("Frame", {
+		Name = tostring(iconName or "Tab") .. "Icon",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(18, 18),
+		Parent = parent,
+	})
+	local colorTargets = {}
+
+	local function track(object, property)
+		table.insert(colorTargets, { Object = object, Property = property })
+		return object
+	end
+
+	local function line(x, y, width, height, rotation)
+		local part = create("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(x, y),
+			Rotation = rotation or 0,
+			Size = UDim2.fromOffset(width, height),
+			Parent = holder,
+		})
+		addCorner(part, 100)
+		return track(part, "BackgroundColor3")
+	end
+
+	local function outline(x, y, width, height, radius, thickness)
+		local frame = create("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(x, y),
+			Size = UDim2.fromOffset(width, height),
+			Parent = holder,
+		})
+		addCorner(frame, radius or 2)
+		local stroke = addStroke(frame, color, thickness or 1.35, 0.05)
+		track(stroke, "Color")
+		return frame
+	end
+
+	local key = string.lower(tostring(iconName or ""))
+	if key == "parts" or key == "world" then
+		-- Isometric cube.
+		line(6, 4, 7, 1.4, -30)
+		line(12, 4, 7, 1.4, 30)
+		line(6, 7.5, 7, 1.4, 30)
+		line(12, 7.5, 7, 1.4, -30)
+		line(3, 10.5, 1.4, 7, 0)
+		line(15, 10.5, 1.4, 7, 0)
+		line(6, 14, 7, 1.4, 30)
+		line(12, 14, 7, 1.4, -30)
+		line(9, 12, 1.4, 7, 0)
+	elseif key == "build" or key == "combat" then
+		-- Hammer.
+		line(10.5, 10.5, 2.4, 13, -38)
+		line(6.2, 5.3, 9, 3, -38)
+		line(3.8, 7, 3.5, 1.6, -38)
+	elseif key == "player" or key == "avatar" then
+		-- Head and shoulders.
+		outline(6, 1.5, 6, 6, 100, 1.5)
+		outline(3, 10, 12, 6.5, 7, 1.5)
+		line(3.6, 15.5, 1.4, 3, 0)
+		line(14.4, 15.5, 1.4, 3, 0)
+	elseif key == "seats" or key == "seat" then
+		-- Chair profile.
+		line(5, 6.5, 2, 9, 0)
+		line(9.5, 10, 11, 2, 0)
+		line(6, 14, 2, 7, 0)
+		line(13, 14, 2, 7, 0)
+		line(14.5, 8, 2, 6, 0)
+	elseif key == "settings" or key == "gui" or key == "misc" then
+		-- Gear with a clean central hub.
+		outline(5, 5, 8, 8, 100, 1.5)
+		outline(7.3, 7.3, 3.4, 3.4, 100, 1.3)
+		line(9, 2.5, 2, 4, 0)
+		line(9, 15.5, 2, 4, 0)
+		line(2.5, 9, 4, 2, 0)
+		line(15.5, 9, 4, 2, 0)
+		line(4.3, 4.3, 2, 3.6, -45)
+		line(13.7, 13.7, 2, 3.6, -45)
+		line(13.7, 4.3, 2, 3.6, 45)
+		line(4.3, 13.7, 2, 3.6, 45)
+	else
+		-- Neutral target icon for custom tabs.
+		outline(3, 3, 12, 12, 100, 1.5)
+		outline(7, 7, 4, 4, 100, 1.3)
+	end
+
+	return holder, colorTargets
+end
+
+local function setSidebarIconColor(tab, color)
+	for _, target in ipairs(tab._iconColorTargets or {}) do
+		if target.Object and target.Object.Parent then
+			local properties = {}
+			properties[target.Property] = color
+			tween(target.Object, 0.14, properties)
+		end
+	end
+end
+
+local function makeDraggable(window, handle, target, onDragged)
+	local dragging = false
+	local dragType
+	local dragStart
+	local startPosition
+	local function stopDragging()
+		dragging = false
+		dragType = nil
+	end
+
+	connect(window, handle.InputBegan, function(input)
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			dragging = true
+			dragType = input.UserInputType
+			dragStart = input.Position
+			startPosition = target.Position
+		end
+	end)
+
+	connect(window, UserInputService.InputChanged, function(input)
+		if not dragging then
+			return
+		end
+		if not handle.Visible then
+			stopDragging()
+			return
+		end
+		if dragType == Enum.UserInputType.MouseButton1
+			and not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+		then
+			stopDragging()
+			return
+		end
+		local isMouseDrag = dragType == Enum.UserInputType.MouseButton1
+			and input.UserInputType == Enum.UserInputType.MouseMovement
+		local isTouchDrag = dragType == Enum.UserInputType.Touch
+			and input.UserInputType == Enum.UserInputType.Touch
+		if not isMouseDrag and not isTouchDrag then
+			return
+		end
+		local delta = input.Position - dragStart
+		if onDragged and (math.abs(delta.X) > 4 or math.abs(delta.Y) > 4) then
+			onDragged()
+		end
+
+		local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+		if not viewport then
+			return
+		end
+		local size = target.AbsoluteSize
+		local anchor = target.AnchorPoint
+		local pointX = startPosition.X.Scale * viewport.X + startPosition.X.Offset + delta.X
+		local pointY = startPosition.Y.Scale * viewport.Y + startPosition.Y.Offset + delta.Y
+		local minX = 8 + size.X * anchor.X
+		local maxX = viewport.X - 8 - size.X * (1 - anchor.X)
+		local minY = 8 + size.Y * anchor.Y
+		local maxY = viewport.Y - 8 - size.Y * (1 - anchor.Y)
+		pointX = math.clamp(pointX, minX, math.max(minX, maxX))
+		pointY = math.clamp(pointY, minY, math.max(minY, maxY))
+		target.Position = UDim2.new(
+			startPosition.X.Scale,
+			pointX - startPosition.X.Scale * viewport.X,
+			startPosition.Y.Scale,
+			pointY - startPosition.Y.Scale * viewport.Y
+		)
+	end)
+
+	connect(window, UserInputService.InputEnded, function(input)
+		if dragging and input.UserInputType == dragType then
+			stopDragging()
+		end
+	end)
+	connect(window, UserInputService.WindowFocusReleased, stopDragging)
+end
+
+local function resolveParent(customParent)
+	if customParent then
+		return customParent
+	end
+	local player = Players.LocalPlayer
+	if not player then
+		return game:GetService("CoreGui")
+	end
+	return player:WaitForChild("PlayerGui")
+end
+
+local function updatePageCanvas(tab)
+	if tab and tab._refreshLayout then
+		tab._refreshLayout()
+	end
+end
+
+function Clear:CreateWindow(options)
+	options = options or {}
+	local window = {
+		_tabs = {},
+		_connections = {},
+		_activeTab = nil,
+		_visible = options.StartOpen ~= false,
+		_toggleKey = options.ToggleKey or Enum.KeyCode.LeftAlt,
+		_capturingKey = false,
+	}
+
+	local parent = resolveParent(options.Parent)
+	local old = parent:FindFirstChild(options.GuiName or "ClearUI")
+	if old then
+		old:Destroy()
+	end
+
+	local gui = create("ScreenGui", {
+		Name = options.GuiName or "ClearUI",
+		DisplayOrder = options.DisplayOrder or 50,
+		IgnoreGuiInset = true,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = parent,
+	})
+	window.Gui = gui
+	local notificationLayer = create("Frame", {
+		Name = "ClearNotificationLayer",
+		AnchorPoint = Vector2.new(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1, -22, 1, -22),
+		Size = UDim2.new(0, 306, 1, -44),
+		ZIndex = 100,
+		Parent = gui,
+	})
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Bottom,
+		Padding = UDim.new(0, 10),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = notificationLayer,
+	})
+	local notificationCards = {}
+	local notificationSerial = 0
+	local launcherBounds = create("Frame", {
+		Name = "LauncherBounds",
+		Active = false,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 0),
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 0,
+		Parent = gui,
+	})
+
+	local launcher = textButton({
+		Name = "Launcher",
+		AnchorPoint = options.LauncherAnchorPoint or Vector2.new(0.5, 0.5),
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		Position = options.LauncherPosition or UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(112, 48),
+		Text = "",
+		Visible = not window._visible,
+		ZIndex = 20,
+		Parent = gui,
+	})
+	addCorner(launcher, 10)
+	addStroke(launcher, Color3.fromRGB(118, 120, 124), 1.2, 0.12)
+	create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, THEME.HeaderTop),
+			ColorSequenceKeypoint.new(0.76, THEME.HeaderMiddle),
+			ColorSequenceKeypoint.new(1, THEME.HeaderBottom),
+		}),
+		Rotation = 90,
+		Parent = launcher,
+	})
+	local launcherDrag = create("UIDragDetector", {
+		Name = "LauncherDrag",
+		BoundingUI = launcherBounds,
+		DragRelativity = Enum.UIDragDetectorDragRelativity.Absolute,
+		DragSpace = Enum.UIDragDetectorDragSpace.Parent,
+		DragStyle = Enum.UIDragDetectorDragStyle.TranslatePlane,
+		ResponseStyle = Enum.UIDragDetectorResponseStyle.Offset,
+		Parent = launcher,
+	})
+	local launcherMark = makeBrandMark(launcher, 20, Color3.fromRGB(238, 238, 240), 2)
+	launcherMark.Position = UDim2.fromOffset(17, 14)
+	launcherMark.ZIndex = 21
+	textLabel({
+		Name = "LauncherTitle",
+		Position = UDim2.fromOffset(45, 0),
+		Size = UDim2.new(1, -53, 1, 0),
+		Font = Enum.Font.GothamBold,
+		Text = "Clear",
+		TextColor3 = Color3.fromRGB(233, 233, 235),
+		TextSize = 16,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 21,
+		Parent = launcher,
+	})
+
+	local main = create("Frame", {
+		Name = "Window",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = THEME.Window,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Position = options.Position or UDim2.fromScale(0.5, 0.5),
+		Size = options.Size or UDim2.fromOffset(748, 480),
+		Visible = window._visible,
+		Parent = gui,
+	})
+	window.Main = main
+	addCorner(main, 18)
+	addStroke(main, Color3.fromRGB(118, 120, 124), 1.5, 0.12)
+
+	local scale = create("UIScale", { Scale = 1, Parent = main })
+	local function fitToViewport()
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return
+		end
+		local view = camera.ViewportSize
+		local wanted = main.AbsoluteSize
+		if wanted.X <= 0 or wanted.Y <= 0 then
+			wanted = Vector2.new(748, 480)
+		end
+		scale.Scale = math.min(1, (view.X - 18) / wanted.X, (view.Y - 18) / wanted.Y)
+	end
+	task.defer(fitToViewport)
+	if workspace.CurrentCamera then
+		connect(window, workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"), fitToViewport)
+	end
+
+	local header = create("Frame", {
+		Name = "Header",
+		-- UIGradient colors multiply the frame color; white preserves the
+		-- intended gray-to-black values instead of crushing them to black.
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 52),
+		ZIndex = 3,
+		Parent = main,
+	})
+	create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, THEME.HeaderTop),
+			ColorSequenceKeypoint.new(0.76, THEME.HeaderMiddle),
+			ColorSequenceKeypoint.new(1, THEME.HeaderBottom),
+		}),
+		Rotation = 90,
+		Parent = header,
+	})
+	addCorner(header, 18)
+	create("Frame", {
+		Name = "HeaderBottomBand",
+		BackgroundColor3 = Color3.fromRGB(4, 5, 6),
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0, 0, 1, -6),
+		Size = UDim2.new(1, 0, 0, 6),
+		ZIndex = 4,
+		Parent = header,
+	})
+	create("Frame", {
+		Name = "HeaderDivider",
+		BackgroundColor3 = Color3.fromRGB(65, 66, 68),
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0, 0, 1, -1),
+		Size = UDim2.new(1, 0, 0, 1),
+		ZIndex = 4,
+		Parent = header,
+	})
+
+	local brandMark = makeBrandMark(header, 21, Color3.fromRGB(238, 238, 240), 2)
+	brandMark.Position = UDim2.fromOffset(24, 14)
+	brandMark.ZIndex = 5
+	textLabel({
+		Name = "ClearTitle",
+		Position = UDim2.fromOffset(56, 2),
+		Size = UDim2.new(0, 190, 1, -3),
+		Font = Enum.Font.GothamBold,
+		Text = "Clear",
+		TextColor3 = THEME.Text,
+		TextSize = 18,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 5,
+		Parent = header,
+	})
+	local expandButton = textButton({
+		Name = "ExpandButton",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 4),
+		Size = UDim2.fromOffset(45, 44),
+		Text = "",
+		ZIndex = 7,
+		Parent = header,
+	})
+
+	local searchButton = textButton({
+		Name = "SearchButton",
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.fromOffset(52, 52),
+		Text = "",
+		ZIndex = 5,
+		Parent = header,
+	})
+	local searchIcon = makeSearchIcon(searchButton, 14, Color3.fromRGB(166, 167, 169))
+	searchIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+	searchIcon.Position = UDim2.fromScale(0.5, 0.5)
+	searchIcon.ZIndex = 6
+
+	local searchBox = create("TextBox", {
+		Name = "SearchBox",
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundColor3 = Color3.fromRGB(24, 25, 26),
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham,
+		PlaceholderColor3 = THEME.TextMuted,
+		PlaceholderText = "Search tabs...",
+		Position = UDim2.new(1, -60, 0, 12),
+		Size = UDim2.fromOffset(174, 28),
+		Text = "",
+		TextColor3 = THEME.Text,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Visible = false,
+		ZIndex = 7,
+		Parent = header,
+	})
+	addCorner(searchBox, 5)
+	addStroke(searchBox, Color3.fromRGB(80, 81, 84), 1, 0.35)
+	addPadding(searchBox, 9, 8, 0, 0)
+
+	local sidebar = create("Frame", {
+		Name = "Sidebar",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, 52),
+		Size = UDim2.new(0, 153, 1, -52),
+		Parent = main,
+	})
+	create("Frame", {
+		BackgroundColor3 = Color3.fromRGB(24, 25, 26),
+		BackgroundTransparency = 0.16,
+		BorderSizePixel = 0,
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.new(0, 1, 1, 0),
+		Parent = sidebar,
+	})
+	local tabHolder = create("Frame", {
+		Name = "TabHolder",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, 17),
+		Size = UDim2.new(1, 0, 1, -17),
+		Parent = sidebar,
+	})
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		Padding = UDim.new(0, 0),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = tabHolder,
+	})
+
+	local pages = create("Frame", {
+		Name = "Pages",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(153, 52),
+		Size = UDim2.new(1, -153, 1, -52),
+		Parent = main,
+	})
+
+	function window:SetVisible(visible)
+		self._visible = not not visible
+		if self._visible then
+			launcher.Visible = false
+			main.Visible = true
+			main.BackgroundTransparency = 1
+			tween(main, 0.18, { BackgroundTransparency = 0 })
+		else
+			searchBox.Visible = false
+			searchBox.Text = ""
+			main.Visible = false
+			launcher.Visible = true
+		end
+	end
+
+	function window:Toggle()
+		self:SetVisible(not self._visible)
+	end
+
+	function window:SetToggleKey(keyCode)
+		if typeof(keyCode) == "EnumItem" and keyCode.EnumType == Enum.KeyCode then
+			self._toggleKey = keyCode
+		end
+	end
+
+	function window:GetToggleKey()
+		return self._toggleKey
+	end
+
+	function window:SetKeyCapture(active)
+		self._capturingKey = not not active
+	end
+
+	function window:SelectTab(tabOrName)
+		local chosen
+		for _, tab in ipairs(self._tabs) do
+			if tab == tabOrName or tab.Title == tabOrName then
+				chosen = tab
+				break
+			end
+		end
+		if not chosen then
+			return
+		end
+		self._activeTab = chosen
+		for _, tab in ipairs(self._tabs) do
+			local active = tab == chosen
+			tab._page.Visible = active
+			tween(tab._label, 0.14, { TextColor3 = active and THEME.White or THEME.TextMuted })
+			setSidebarIconColor(tab, active and THEME.White or THEME.TextMuted)
+			tab._activeBar.Visible = active
+		end
+	end
+
+	function window:AddTab(config)
+		config = config or {}
+		local title = config.Title or "Tab"
+		local order = #self._tabs + 1
+		local tab = {
+			Title = title,
+			_window = self,
+			_sections = {},
+		}
+
+		local button = textButton({
+			Name = title,
+			BackgroundTransparency = 1,
+			LayoutOrder = order,
+			Size = UDim2.new(1, 0, 0, 42),
+			Text = "",
+			Parent = tabHolder,
+		})
+		local activeBar = create("Frame", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = THEME.White,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0, 14, 0.5, 0),
+			Size = UDim2.fromOffset(3, 22),
+			Visible = false,
+			Parent = button,
+		})
+		addCorner(activeBar, 2)
+
+		local icon, iconColorTargets = makeSidebarIcon(button, config.Icon or title, THEME.TextMuted)
+		icon.Position = UDim2.fromOffset(24, 12)
+		local label = textLabel({
+			Position = UDim2.fromOffset(44, 0),
+			Size = UDim2.new(1, -51, 1, 0),
+			Font = Enum.Font.GothamMedium,
+			Text = title,
+			TextColor3 = THEME.TextMuted,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = button,
+		})
+
+		local page = create("ScrollingFrame", {
+			Name = title .. "Page",
+			Active = true,
+			AutomaticCanvasSize = Enum.AutomaticSize.None,
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			CanvasSize = UDim2.fromOffset(0, 0),
+			Position = UDim2.fromOffset(29, 35),
+			ScrollBarImageColor3 = Color3.fromRGB(154, 155, 157),
+			ScrollBarImageTransparency = 0.14,
+			ScrollBarThickness = 3,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
+			Size = UDim2.new(1, -38, 1, -69),
+			TopImage = "rbxasset://textures/ui/Scroll/scroll-middle.png",
+			MidImage = "rbxasset://textures/ui/Scroll/scroll-middle.png",
+			BottomImage = "rbxasset://textures/ui/Scroll/scroll-middle.png",
+			Visible = false,
+			Parent = pages,
+		})
+		tab._button = button
+		tab._activeBar = activeBar
+		tab._icon = icon
+		tab._iconColorTargets = iconColorTargets
+		tab._label = label
+		tab._page = page
+		function tab._refreshLayout()
+			task.defer(function()
+				if not page.Parent then return end
+				local leftY = 0
+				local rightY = 0
+				for index, section in ipairs(tab._sections) do
+					local side = section.Side
+					if side ~= "Left" and side ~= "Right" then
+						side = index % 2 == 0 and "Right" or "Left"
+					end
+					local y = side == "Right" and rightY or leftY
+					section.Frame.Position = UDim2.fromOffset(side == "Right" and 251 or 0, y)
+					local height = section.Frame.AbsoluteSize.Y
+					if height <= 0 then height = section.Frame.Size.Y.Offset end
+					if side == "Right" then
+						rightY = y + height + 10
+					else
+						leftY = y + height + 10
+					end
+				end
+				page.CanvasSize = UDim2.fromOffset(0, math.max(leftY, rightY, 3))
+			end)
+		end
+		table.insert(self._tabs, tab)
+		connect(self, button.MouseButton1Click, function()
+			self:SelectTab(tab)
+		end)
+		connect(self, button.MouseEnter, function()
+			if self._activeTab ~= tab then
+				tween(label, 0.12, { TextColor3 = THEME.TextDim })
+				setSidebarIconColor(tab, THEME.TextDim)
+			end
+		end)
+		connect(self, button.MouseLeave, function()
+			if self._activeTab ~= tab then
+				tween(label, 0.12, { TextColor3 = THEME.TextMuted })
+				setSidebarIconColor(tab, THEME.TextMuted)
+			end
+		end)
+
+		function tab:AddSection(sectionConfig)
+			sectionConfig = sectionConfig or {}
+			local section = {
+				_tab = self,
+				_window = self._window,
+				_controls = {},
+				Side = sectionConfig.Side,
+			}
+			local sectionFrame = create("Frame", {
+				Name = sectionConfig.Title or "Section",
+				BackgroundColor3 = THEME.Card,
+				BorderSizePixel = 0,
+				LayoutOrder = #self._sections + 1,
+				Size = UDim2.fromOffset(237, 68),
+				Parent = page,
+			})
+			addCorner(sectionFrame, 5)
+			addStroke(sectionFrame, THEME.CardBorder, 1, 0.12)
+			local sectionLayout = create("UIListLayout", {
+				FillDirection = Enum.FillDirection.Vertical,
+				HorizontalAlignment = Enum.HorizontalAlignment.Left,
+				Padding = UDim.new(0, 0),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Parent = sectionFrame,
+			})
+
+			local sectionHeader = create("Frame", {
+				BackgroundTransparency = 1,
+				LayoutOrder = 0,
+				Size = UDim2.new(1, 0, 0, 58),
+				Parent = sectionFrame,
+			})
+			textLabel({
+				Position = UDim2.fromOffset(17, 11),
+				Size = UDim2.new(1, -48, 0, 20),
+				Font = Enum.Font.GothamBold,
+				Text = sectionConfig.Title or "Section",
+				TextColor3 = THEME.Text,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = sectionHeader,
+			})
+			textLabel({
+				Position = UDim2.fromOffset(17, 31),
+				Size = UDim2.new(1, -48, 0, 15),
+				Text = sectionConfig.Description or "",
+				TextColor3 = Color3.fromRGB(94, 95, 98),
+				TextSize = 9,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = sectionHeader,
+			})
+			if sectionConfig.Locked then
+				local lock = makeLockIcon(sectionHeader, Color3.fromRGB(101, 102, 106))
+				lock.Position = UDim2.new(1, -24, 0, 13)
+			end
+
+			local function refreshSection()
+				task.defer(function()
+					if sectionFrame.Parent then
+						sectionFrame.Size = UDim2.fromOffset(237, sectionLayout.AbsoluteContentSize.Y + 10)
+						updatePageCanvas(tab)
+					end
+				end)
+			end
+			connect(self._window, sectionLayout:GetPropertyChangedSignal("AbsoluteContentSize"), refreshSection)
+
+			local function addDivider(control)
+				create("Frame", {
+					BackgroundColor3 = THEME.Divider,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, 0),
+					Size = UDim2.new(1, 0, 0, 1),
+					Parent = control,
+				})
+			end
+
+			function section:AddToggle(toggleConfig)
+				toggleConfig = toggleConfig or {}
+				local state = toggleConfig.Default == true
+				local badgeWidth = toggleConfig.Badge
+					and math.max(32, #tostring(toggleConfig.Badge) * 6 + 10)
+					or 0
+				local row = textButton({
+					Name = toggleConfig.Title or "Toggle",
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 36),
+					Text = "",
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+
+				local title = textLabel({
+					Position = UDim2.fromOffset(10, 1),
+					Size = UDim2.new(1, -(62 + badgeWidth + (badgeWidth > 0 and 6 or 0)), 1, -1),
+					Text = toggleConfig.Title or "↕",
+					TextColor3 = THEME.TextDim,
+					TextSize = 12,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+
+				if toggleConfig.Badge then
+					local badge = textLabel({
+						AnchorPoint = Vector2.new(1, 0.5),
+						BackgroundColor3 = THEME.Badge,
+						BackgroundTransparency = 0,
+						Position = UDim2.new(1, -50, 0.5, 1),
+						Size = UDim2.fromOffset(badgeWidth, 15),
+						Font = Enum.Font.GothamMedium,
+						Text = tostring(toggleConfig.Badge),
+						TextColor3 = Color3.fromRGB(213, 213, 216),
+						TextSize = 8,
+						Parent = row,
+					})
+				addCorner(badge, 3)
+				end
+
+				local track = create("Frame", {
+					AnchorPoint = Vector2.new(1, 0.5),
+					BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff,
+					BorderSizePixel = 0,
+					Position = UDim2.new(1, -16, 0.5, 1),
+					Size = UDim2.fromOffset(26, 13),
+					Parent = row,
+				})
+				addCorner(track, 20)
+				local knob = create("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundColor3 = state and THEME.Knob or Color3.fromRGB(181, 182, 185),
+					BorderSizePixel = 0,
+					Position = state and UDim2.new(1, -6.5, 0.5, 0) or UDim2.fromOffset(6.5, 6.5),
+					Size = UDim2.fromOffset(9, 9),
+					Parent = track,
+				})
+				addCorner(knob, 20)
+
+				local control = {}
+				function control:Set(value, silent)
+					state = not not value
+					tween(track, 0.16, { BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff })
+					tween(knob, 0.16, {
+						BackgroundColor3 = state and THEME.Knob or Color3.fromRGB(181, 182, 185),
+						Position = state and UDim2.new(1, -6.5, 0.5, 0) or UDim2.fromOffset(6.5, 6.5),
+					})
+					if not silent then
+						callback(toggleConfig.Callback, state)
+					end
+				end
+				function control:Get()
+					return state
+				end
+				connect(self._window, row.MouseButton1Click, function()
+					control:Set(not state)
+				end)
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddDropdown(dropdownConfig)
+				dropdownConfig = dropdownConfig or {}
+				local optionsList = dropdownConfig.Options or {}
+				local selected = dropdownConfig.Default or optionsList[1] or "None"
+				local open = dropdownConfig.Open == true
+				local row = create("Frame", {
+					Name = dropdownConfig.Title or "Dropdown",
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, open and 254 or 66),
+					ClipsDescendants = true,
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				textLabel({
+					Position = UDim2.fromOffset(10, 8),
+					Size = UDim2.new(1, -20, 0, 18),
+					Font = Enum.Font.GothamMedium,
+					Text = dropdownConfig.Title or "Dropdown",
+					TextColor3 = THEME.Text,
+					TextSize = 10,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+
+				local box = create("Frame", {
+					BackgroundColor3 = THEME.Field,
+					BorderSizePixel = 0,
+					ClipsDescendants = true,
+					Position = UDim2.fromOffset(9, 29),
+					Size = UDim2.new(1, -27, 0, open and 213 or 25),
+					Parent = row,
+				})
+				addCorner(box, 5)
+				addStroke(box, Color3.fromRGB(68, 69, 72), 1, 0.65)
+
+				local selectButton = textButton({
+					BackgroundColor3 = THEME.Field,
+					Position = UDim2.fromOffset(0, 0),
+					Size = UDim2.new(1, 0, 0, 25),
+					Text = "",
+					Parent = box,
+				})
+				local selectedLabel = textLabel({
+					Position = UDim2.fromOffset(10, 0),
+					Size = UDim2.new(1, -36, 1, 0),
+					Font = Enum.Font.GothamMedium,
+					Text = tostring(selected),
+					TextColor3 = Color3.fromRGB(227, 227, 229),
+					TextSize = 9,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = selectButton,
+				})
+				textLabel({
+					Position = UDim2.new(1, -25, 0, 0),
+					Size = UDim2.fromOffset(22, 25),
+					Text = "↕",
+					TextColor3 = Color3.fromRGB(206, 206, 209),
+					TextSize = 10,
+					Parent = selectButton,
+				})
+
+				local search = create("TextBox", {
+					BackgroundColor3 = THEME.Field,
+					BorderSizePixel = 0,
+					ClearTextOnFocus = false,
+					Font = Enum.Font.Gotham,
+					PlaceholderColor3 = Color3.fromRGB(133, 134, 137),
+					PlaceholderText = "⌕ Search...",
+					Position = UDim2.fromOffset(0, 25),
+					Size = UDim2.new(1, 0, 0, 25),
+					Text = "",
+					TextColor3 = THEME.Text,
+					TextSize = 9,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Visible = open,
+					Parent = box,
+				})
+				addPadding(search, 9, 7, 0, 0)
+				create("Frame", {
+					BackgroundColor3 = Color3.fromRGB(58, 59, 61),
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, 24),
+					Size = UDim2.new(1, 0, 0, 1),
+					Parent = search,
+				})
+
+				local list = create("ScrollingFrame", {
+					BackgroundColor3 = THEME.Field,
+					BorderSizePixel = 0,
+					CanvasSize = UDim2.fromOffset(0, #optionsList * 16),
+					Position = UDim2.fromOffset(0, 50),
+					ScrollBarImageColor3 = Color3.fromRGB(92, 93, 96),
+					ScrollBarThickness = 3,
+					ScrollingDirection = Enum.ScrollingDirection.Y,
+					Size = UDim2.new(1, 0, 0, 163),
+					Visible = open,
+					Parent = box,
+				})
+				local listLayout = create("UIListLayout", {
+					FillDirection = Enum.FillDirection.Vertical,
+					HorizontalAlignment = Enum.HorizontalAlignment.Left,
+					Padding = UDim.new(0, 0),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Parent = list,
+				})
+
+				local optionButtons = {}
+				local control = {}
+				local setSelected
+				local function populate(filter)
+					filter = string.lower(filter or "")
+					for _, optionButton in ipairs(optionButtons) do
+						optionButton:Destroy()
+					end
+					table.clear(optionButtons)
+					local visibleCount = 0
+					for index, option in ipairs(optionsList) do
+						local optionText = tostring(option)
+						if filter == "" or string.find(string.lower(optionText), filter, 1, true) then
+							visibleCount += 1
+							local optionButton = textButton({
+								BackgroundColor3 = THEME.Field,
+								LayoutOrder = index,
+								Size = UDim2.new(1, -4, 0, 16),
+								Text = optionText,
+								TextColor3 = optionText == tostring(selected) and Color3.fromRGB(209, 209, 212)
+									or Color3.fromRGB(148, 149, 153),
+								TextSize = 9,
+								TextXAlignment = Enum.TextXAlignment.Left,
+								Parent = list,
+							})
+							addPadding(optionButton, 9, 3, 0, 0)
+							connect(self._window, optionButton.MouseEnter, function()
+								tween(optionButton, 0.1, { BackgroundColor3 = THEME.FieldHover })
+							end)
+							connect(self._window, optionButton.MouseLeave, function()
+								tween(optionButton, 0.1, { BackgroundColor3 = THEME.Field })
+							end)
+							connect(self._window, optionButton.MouseButton1Click, function()
+								setSelected(option)
+							end)
+							table.insert(optionButtons, optionButton)
+						end
+					end
+					list.CanvasSize = UDim2.fromOffset(0, visibleCount * 16)
+				end
+
+				setSelected = function(value, silent)
+					selected = value
+					selectedLabel.Text = tostring(value)
+					populate(search.Text)
+					if not silent then
+						callback(dropdownConfig.Callback, value)
+					end
+				end
+				function control:Set(value, silent)
+					setSelected(value, silent)
+				end
+				function control:Get()
+					return selected
+				end
+				function control:SetOpen(value)
+					open = not not value
+					search.Visible = open
+					list.Visible = open
+					tween(row, 0.18, { Size = UDim2.new(1, 0, 0, open and 254 or 66) })
+					tween(box, 0.18, { Size = UDim2.new(1, -27, 0, open and 213 or 25) })
+					task.delay(0.2, refreshSection)
+				end
+				function control:Refresh(newOptions, keepSelection)
+					optionsList = newOptions or {}
+					if not keepSelection then
+						selected = optionsList[1] or "None"
+						selectedLabel.Text = tostring(selected)
+					end
+					populate(search.Text)
+				end
+
+				connect(self._window, selectButton.MouseButton1Click, function()
+					control:SetOpen(not open)
+				end)
+				connect(self._window, search:GetPropertyChangedSignal("Text"), function()
+					populate(search.Text)
+				end)
+				populate("")
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddButton(buttonConfig)
+				buttonConfig = buttonConfig or {}
+				local row = create("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 43),
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				local button = textButton({
+					BackgroundColor3 = THEME.Field,
+					Position = UDim2.fromOffset(9, 9),
+					Size = UDim2.new(1, -18, 0, 25),
+					Font = Enum.Font.GothamMedium,
+					Text = buttonConfig.Title or "Button",
+					TextColor3 = THEME.Text,
+					TextSize = 10,
+					Parent = row,
+				})
+				addCorner(button, 4)
+				connect(self._window, button.MouseButton1Click, function()
+					callback(buttonConfig.Callback)
+				end)
+				connect(self._window, button.MouseEnter, function()
+					tween(button, 0.1, { BackgroundColor3 = THEME.FieldHover })
+				end)
+				connect(self._window, button.MouseLeave, function()
+					tween(button, 0.1, { BackgroundColor3 = THEME.Field })
+				end)
+				local control = { Instance = button }
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddSlider(sliderConfig)
+				sliderConfig = sliderConfig or {}
+				local minimum = sliderConfig.Min or 0
+				local maximum = sliderConfig.Max or 100
+				local value = math.clamp(sliderConfig.Default or minimum, minimum, maximum)
+				local row = create("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 54),
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				local label = textLabel({
+					Position = UDim2.fromOffset(10, 6),
+					Size = UDim2.new(1, -20, 0, 18),
+					Font = Enum.Font.GothamMedium,
+					TextColor3 = THEME.Text,
+					TextSize = 10,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+				local bar = textButton({
+					AnchorPoint = Vector2.new(0, 0.5),
+					BackgroundColor3 = Color3.fromRGB(52, 53, 56),
+					Position = UDim2.fromOffset(10, 36),
+					Size = UDim2.new(1, -20, 0, 5),
+					Text = "",
+					Parent = row,
+				})
+				addCorner(bar, 8)
+				local fill = create("Frame", {
+					BackgroundColor3 = THEME.ToggleOn,
+					BorderSizePixel = 0,
+					Size = UDim2.fromScale((value - minimum) / math.max(1, maximum - minimum), 1),
+					Parent = bar,
+				})
+				addCorner(fill, 8)
+				local control = {}
+				function control:Set(newValue, silent)
+					newValue = math.clamp(newValue, minimum, maximum)
+					if sliderConfig.Round ~= false then
+						newValue = math.floor(newValue + 0.5)
+					end
+					value = newValue
+					label.Text = string.format("%s   %s", sliderConfig.Title or "Slider", tostring(value))
+					fill.Size = UDim2.fromScale((value - minimum) / math.max(1, maximum - minimum), 1)
+					if not silent then
+						callback(sliderConfig.Callback, value)
+					end
+				end
+				function control:Get()
+					return value
+				end
+				local sliding = false
+				local function setFromInput(input)
+					local alpha = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+					control:Set(minimum + (maximum - minimum) * alpha)
+				end
+				connect(self._window, bar.InputBegan, function(input)
+					if
+						input.UserInputType == Enum.UserInputType.MouseButton1
+						or input.UserInputType == Enum.UserInputType.Touch
+					then
+						sliding = true
+						setFromInput(input)
+					end
+				end)
+				connect(self._window, UserInputService.InputChanged, function(input)
+					if
+						sliding
+						and (
+							input.UserInputType == Enum.UserInputType.MouseMovement
+							or input.UserInputType == Enum.UserInputType.Touch
+						)
+					then
+						setFromInput(input)
+					end
+				end)
+				connect(self._window, UserInputService.InputEnded, function(input)
+					if
+						input.UserInputType == Enum.UserInputType.MouseButton1
+						or input.UserInputType == Enum.UserInputType.Touch
+					then
+						sliding = false
+					end
+				end)
+				control:Set(value, true)
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			function section:AddLabel(labelConfig)
+				if type(labelConfig) == "string" then
+					labelConfig = { Text = labelConfig }
+				end
+				labelConfig = labelConfig or {}
+				local row = create("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = #self._controls + 1,
+					Size = UDim2.new(1, 0, 0, 34),
+					Parent = sectionFrame,
+				})
+				addDivider(row)
+				local label = textLabel({
+					Position = UDim2.fromOffset(10, 1),
+					Size = UDim2.new(1, -20, 1, -1),
+					Text = labelConfig.Text or "Label",
+					TextColor3 = THEME.TextDim,
+					TextSize = 10,
+					TextWrapped = true,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = row,
+				})
+				local control = {}
+				function control:Set(text)
+					label.Text = tostring(text)
+				end
+				table.insert(self._controls, control)
+				refreshSection()
+				return control
+			end
+
+			section.Frame = sectionFrame
+			table.insert(self._sections, section)
+			refreshSection()
+			return section
+		end
+
+		if #self._tabs == 1 then
+			self:SelectTab(tab)
+		end
+		return tab
+	end
+
+	function window:Notify(data)
+		data = data or {}
+		local title = tostring(data.Title or "Clear")
+		local content = tostring(data.Content or data.Description or data.Text or "")
+		local duration = math.clamp(tonumber(data.Duration) or 4, 1.5, 12)
+		local height = #content > 58 and 86 or 74
+
+		for index = #notificationCards, 1, -1 do
+			if not notificationCards[index].Parent then
+				table.remove(notificationCards, index)
+			end
+		end
+		while #notificationCards >= 4 do
+			notificationCards[1]:Destroy()
+			table.remove(notificationCards, 1)
+		end
+
+		notificationSerial = notificationSerial + 1
+		local card = create("CanvasGroup", {
+			Name = "ClearGlassNotification",
+			BackgroundColor3 = Color3.fromRGB(119, 124, 134),
+			BackgroundTransparency = 0.14,
+			BorderSizePixel = 0,
+			ClipsDescendants = true,
+			GroupColor3 = Color3.fromRGB(255, 255, 255),
+			GroupTransparency = 0,
+			LayoutOrder = notificationSerial,
+			Size = UDim2.fromOffset(300, height),
+			ZIndex = 101,
+			Parent = notificationLayer,
+		})
+		addCorner(card, 14)
+		addStroke(card, Color3.fromRGB(247, 249, 253), 1, 0.28)
+		create("UIGradient", {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(187, 192, 202)),
+				ColorSequenceKeypoint.new(0.34, Color3.fromRGB(151, 157, 168)),
+				ColorSequenceKeypoint.new(0.72, Color3.fromRGB(112, 118, 130)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(82, 87, 98)),
+			}),
+			Rotation = 132,
+			Parent = card,
+		})
+
+		local topGlassRim = create("Frame", {
+			Name = "TopGlassRim",
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = 0.54,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(15, 1),
+			Size = UDim2.new(1, -30, 0, 1),
+			ZIndex = 102,
+			Parent = card,
+		})
+		addCorner(topGlassRim, 100)
+		create("UIGradient", {
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 1),
+				NumberSequenceKeypoint.new(0.22, 0.1),
+				NumberSequenceKeypoint.new(0.7, 0.35),
+				NumberSequenceKeypoint.new(1, 1),
+			}),
+			Parent = topGlassRim,
+		})
+
+		local accent = create("Frame", {
+			Name = "NotificationAccent",
+			BackgroundColor3 = Color3.fromRGB(235, 238, 244),
+			BackgroundTransparency = 0.08,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0, 0, 0.5, -19),
+			Size = UDim2.fromOffset(3, 38),
+			ZIndex = 103,
+			Parent = card,
+		})
+		addCorner(accent, 100)
+
+		local iconPlate = create("Frame", {
+			Name = "NotificationIconPlate",
+			BackgroundColor3 = Color3.fromRGB(104, 111, 123),
+			BackgroundTransparency = 0.12,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0, 13, 0.5, -17),
+			Size = UDim2.fromOffset(34, 34),
+			ZIndex = 103,
+			Parent = card,
+		})
+		addCorner(iconPlate, 10)
+		addStroke(iconPlate, Color3.fromRGB(252, 253, 255), 1, 0.3)
+		create("UIGradient", {
+			Color = ColorSequence.new(Color3.fromRGB(164, 172, 186), Color3.fromRGB(91, 98, 111)),
+			Rotation = 135,
+			Parent = iconPlate,
+		})
+		local mark = makeBrandMark(iconPlate, 16, Color3.fromRGB(255, 255, 255), 2)
+		mark.Position = UDim2.fromOffset(9, 9)
+		mark.ZIndex = 104
+		for _, piece in ipairs(mark:GetChildren()) do
+			if piece:IsA("GuiObject") then
+				piece.ZIndex = 104
+			end
+		end
+
+		textLabel({
+			Name = "NotificationTitle",
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(58, 8),
+			Size = UDim2.new(1, -72, 0, 21),
+			Text = title,
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			TextSize = 14,
+			TextStrokeColor3 = Color3.fromRGB(48, 52, 60),
+			TextStrokeTransparency = 0.72,
+			TextTransparency = 0,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 104,
+			Parent = card,
+		})
+		textLabel({
+			Name = "NotificationContent",
+			Position = UDim2.fromOffset(58, 31),
+			Size = UDim2.new(1, -72, 1, -39),
+			Text = content,
+			TextColor3 = Color3.fromRGB(248, 249, 252),
+			TextSize = 11,
+			TextStrokeColor3 = Color3.fromRGB(52, 56, 64),
+			TextStrokeTransparency = 0.78,
+			TextTransparency = 0,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			ZIndex = 104,
+			Parent = card,
+		})
+
+		local progressTrack = create("Frame", {
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = 0.78,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0, 12, 1, -5),
+			Size = UDim2.new(1, -24, 0, 2),
+			ZIndex = 103,
+			Parent = card,
+		})
+		addCorner(progressTrack, 100)
+		local progress = create("Frame", {
+			BackgroundColor3 = Color3.fromRGB(240, 242, 246),
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 104,
+			Parent = progressTrack,
+		})
+		addCorner(progress, 100)
+
+		local scaleIn = create("UIScale", { Scale = 0.95, Parent = card })
+		table.insert(notificationCards, card)
+		TweenService:Create(scaleIn, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Scale = 1,
+		}):Play()
+		TweenService:Create(progress, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+			Size = UDim2.new(0, 0, 1, 0),
+		}):Play()
+
+		task.delay(duration, function()
+			if not card.Parent then return end
+			TweenService:Create(scaleIn, TweenInfo.new(0.14, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+				Scale = 0.96,
+			}):Play()
+			task.wait(0.14)
+			if card.Parent then card:Destroy() end
+		end)
+	end
+
+	function window:Destroy()
+		for _, connection in ipairs(self._connections) do
+			if connection.Connected then
+				connection:Disconnect()
+			end
+		end
+		table.clear(self._connections)
+		if gui then
+			gui:Destroy()
+		end
+	end
+
+	local launcherLastClick = -math.huge
+	local headerLastClick = -math.huge
+	local function pointInside(guiObject, position)
+		local corner = guiObject.AbsolutePosition
+		local size = guiObject.AbsoluteSize
+		local function contains(x, y)
+			return x >= corner.X and x <= corner.X + size.X
+				and y >= corner.Y and y <= corner.Y + size.Y
+		end
+		if contains(position.X, position.Y) then
+			return true
+		end
+		local inset = GuiService:GetGuiInset()
+		return contains(position.X - inset.X, position.Y - inset.Y)
+	end
+	local function registerDoubleClick(useLauncher)
+		local now = os.clock()
+		local lastClick = useLauncher and launcherLastClick or headerLastClick
+		if now - lastClick <= 0.55 then
+			if useLauncher then
+				launcherLastClick = -math.huge
+			else
+				headerLastClick = -math.huge
+			end
+			window:SetVisible(not window._visible)
+		elseif useLauncher then
+			launcherLastClick = now
+		else
+			headerLastClick = now
+		end
+	end
+	connect(window, UserInputService.InputBegan, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch
+		then
+			return
+		end
+		if launcher.Visible and pointInside(launcher, input.Position) then
+			registerDoubleClick(true)
+		elseif main.Visible and pointInside(expandButton, input.Position) then
+			registerDoubleClick(false)
+		end
+	end)
+	connect(window, searchButton.MouseButton1Click, function()
+		searchBox.Visible = not searchBox.Visible
+		if searchBox.Visible then
+			searchBox:CaptureFocus()
+		else
+			searchBox.Text = ""
+		end
+	end)
+	connect(window, searchBox:GetPropertyChangedSignal("Text"), function()
+		local query = string.lower(searchBox.Text)
+		for _, tab in ipairs(window._tabs) do
+			tab._button.Visible = query == "" or string.find(string.lower(tab.Title), query, 1, true) ~= nil
+		end
+	end)
+	connect(window, UserInputService.InputBegan, function(input)
+		if not window._capturingKey and input.KeyCode == window._toggleKey then
+			window:Toggle()
+		end
+	end)
+
+	makeDraggable(window, header, main)
+	return window
+end
+
+function Clear:Demo(options)
+	options = options or {}
+	options.Title = options.Title or "Clear"
+	if options.StartOpen == nil then
+		options.StartOpen = true
+	end
+	local window = self:CreateWindow(options)
+	local tabs = {
+		window:AddTab({ Title = "Combat", Icon = "Combat" }),
+		window:AddTab({ Title = "Detections", Icon = "Detections" }),
+		window:AddTab({ Title = "Visuals", Icon = "Visuals" }),
+		window:AddTab({ Title = "Player", Icon = "Player" }),
+		window:AddTab({ Title = "Sword", Icon = "Sword" }),
+		window:AddTab({ Title = "Avatar", Icon = "Avatar" }),
+		window:AddTab({ Title = "World", Icon = "World" }),
+		window:AddTab({ Title = "Blatant", Icon = "Blatant" }),
+		window:AddTab({ Title = "Misc", Icon = "Misc" }),
+		window:AddTab({ Title = "GUI", Icon = "GUI" }),
+	}
+
+	local skybox = tabs[7]:AddSection({
+		Title = "Custom Skybox",
+		Description = "change the world skybox",
+		Locked = true,
+	})
+	skybox:AddToggle({
+		Badge = "None",
+		Default = true,
+		Callback = options.OnSkyboxToggle,
+	})
+	skybox:AddDropdown({
+		Title = "Skybox Theme",
+		Options = {
+			"Default",
+			"Minecraft",
+			"PurpleDay",
+			"RedNight",
+			"Trollge",
+			"Night",
+			"Space",
+			"VibeMorning",
+			"VibeNight",
+			"PurpleSplash",
+		},
+		Default = "RedNight",
+		Open = true,
+		Callback = options.OnSkyboxChanged,
+	})
+
+	window:SelectTab(tabs[7])
+	return window
+end
+
+return Clear
+end)()
+
+
+local ClearCompat = (function()
+	local Adapter = {}
+
+	local function vectorSize(value)
+		if typeof(value) == "Vector2" then
+			return UDim2.fromOffset(value.X, value.Y)
+		end
+		return value or UDim2.fromOffset(748, 480)
+	end
+
+	function Adapter.CreateWindow(options)
+		options = options or {}
+		local rawWindow = Clear:CreateWindow({
+			Title = options.Title or "Clear",
+			StartOpen = true,
+			ToggleKey = options.ToggleKey or Enum.KeyCode.LeftAlt,
+			GuiName = options.GuiName or "ClearNDSPartControl",
+			Size = vectorSize(options.Size),
+		})
+		local window = {
+			Raw = rawWindow,
+			Connections = {},
+			Destroyed = false,
+		}
+
+		function window:_Connect(signal, handler)
+			local connection = signal:Connect(handler)
+			table.insert(self.Connections, connection)
+			return connection
+		end
+
+		function window:Notify(data)
+			rawWindow:Notify({
+				Title = tostring(data.Title or "Clear"),
+				Content = tostring(data.Content or data.Description or ""),
+				Duration = tonumber(data.Duration) or 4,
+			})
+		end
+
+		function window:CreateTab(tabOptions)
+			tabOptions = tabOptions or {}
+			local icon = tabOptions.Icon
+			local iconText = type(icon) == "string" and #icon <= 2 and icon or nil
+			local rawTab = rawWindow:AddTab({
+				Title = tabOptions.Name or tabOptions.Title or "Tab",
+				Icon = icon,
+				IconText = iconText,
+			})
+			local tab = { Raw = rawTab, Window = self }
+
+			function tab:Select()
+				rawWindow:SelectTab(rawTab)
+			end
+
+			function tab:CreateSection(sectionOptions)
+				sectionOptions = sectionOptions or {}
+				local rawSection = rawTab:AddSection({
+					Title = sectionOptions.Title or sectionOptions.Name or "Section",
+					Description = sectionOptions.Description or "",
+					Locked = sectionOptions.Locked,
+					Side = sectionOptions.Side,
+				})
+				local section = { Raw = rawSection, Window = self.Window }
+
+				function section:AddToggle(controlOptions)
+					controlOptions = controlOptions or {}
+					return rawSection:AddToggle({
+						Title = controlOptions.Name or controlOptions.Title or "Toggle",
+						Badge = controlOptions.Tag or controlOptions.Badge,
+						Default = controlOptions.Default == true,
+						Callback = controlOptions.Callback,
+					})
+				end
+
+				function section:AddSlider(controlOptions)
+					controlOptions = controlOptions or {}
+					return rawSection:AddSlider({
+						Title = controlOptions.Name or controlOptions.Title or "Slider",
+						Min = controlOptions.Min,
+						Max = controlOptions.Max,
+						Default = controlOptions.Default,
+						Round = controlOptions.Round ~= false,
+						Callback = controlOptions.Callback,
+					})
+				end
+
+				function section:AddDropdown(controlOptions)
+					controlOptions = controlOptions or {}
+					return rawSection:AddDropdown({
+						Title = controlOptions.Name or controlOptions.Title or "Dropdown",
+						Options = controlOptions.Options or controlOptions.Values or {},
+						Default = controlOptions.Default,
+						Open = controlOptions.Open == true,
+						Callback = controlOptions.Callback,
+					})
+				end
+
+				function section:AddButton(controlOptions)
+					controlOptions = controlOptions or {}
+					return rawSection:AddButton({
+						Title = controlOptions.Name or controlOptions.Title or "Button",
+						Callback = controlOptions.Callback,
+					})
+				end
+
+				function section:AddParagraph(controlOptions)
+					controlOptions = controlOptions or {}
+					return rawSection:AddLabel({
+						Text = controlOptions.Content or controlOptions.Description or controlOptions.Text or "",
+						Height = controlOptions.Height,
+					})
+				end
+
+				function section:AddInput(controlOptions)
+					controlOptions = controlOptions or {}
+					local value = tostring(controlOptions.Default or "")
+					local label = rawSection:AddLabel({
+						Text = string.format("%s: %s", controlOptions.Name or "Status", value),
+					})
+					local control = { TextBox = { Text = value } }
+					function control:Set(newValue, silent)
+						value = tostring(newValue or "")
+						self.TextBox.Text = value
+						label:Set(string.format("%s: %s", controlOptions.Name or "Status", value))
+						if not silent and controlOptions.Callback then
+							controlOptions.Callback(value)
+						end
+					end
+					function control:Get()
+						return value
+					end
+					return control
+				end
+
+				return section
+			end
+
+			return tab
+		end
+
+		local rawDestroy = rawWindow.Destroy
+		function window:Destroy()
+			if self.Destroyed then
+				return
+			end
+			self.Destroyed = true
+			for _, connection in ipairs(self.Connections) do
+				pcall(function()
+					connection:Disconnect()
+				end)
+			end
+			table.clear(self.Connections)
+			rawDestroy(rawWindow)
+		end
+
+		return window
+	end
+
+	return Adapter
+end)()
+
+-- Natural Disaster Survival - shared part controller
+-- Moves only unanchored physics assemblies under workspace.Structure.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Mouse = LocalPlayer:GetMouse()
+
+-- Change this one line if you want a different fly toggle key.
+local FLY_KEYBIND = Enum.KeyCode.F
+
+local GlobalEnvironment = getgenv()
+local previousCleanup = GlobalEnvironment.__ZenthraNDSPartControlCleanup
+if type(previousCleanup) == "function" then
+	pcall(previousCleanup)
+end
+local sessionToken = {}
+GlobalEnvironment.__ZenthraNDSPartControlSession = sessionToken
+
+local oldGui = PlayerGui:FindFirstChild("ClearNDSPartControl") or PlayerGui:FindFirstChild("ZenthraNDSPartControl")
+if oldGui then
+	oldGui:Destroy()
+end
+
+local state = {
+	bringing = false,
+	bringStartTime = 0,
+	bringDelay = 10,
+	bringSpinAngle = 0,
+	bringSpinSpeed = 15,
+	bringRadius = 3,
+	orbiting = false,
+	freezing = false,
+	antiFling = true,
+	flyEnabled = false,
+	flySpeed = 60,
+	flyVelocity = nil,
+	flyGyro = nil,
+	flyCharacter = nil,
+	flyPoseCharacter = nil,
+	flyPoseMotors = {},
+	flyAnimateScript = nil,
+	flyAnimateWasDisabled = nil,
+	flyStartedAt = 0,
+	noDamage = false,
+	noDamageHumanoid = nil,
+	noDamageHealthConnection = nil,
+	noDamageDiedConnection = nil,
+	noDamageStateConnection = nil,
+	noDamageForceField = nil,
+	noDamageSaved = nil,
+	noDamageCanTouch = {},
+	noDamageSafeCFrame = nil,
+	noDamageTouchAccumulator = 0,
+	target = nil,
+	targetText = LocalPlayer.Name,
+	verticalOffset = 8,
+	orbitRadius = 18,
+	orbitSpeed = 2,
+	orbitAngle = 0,
+	roots = {},
+	originalCFrames = {},
+	frozenCFrames = {},
+	partCanCollide = {},
+	antiFlingCanCollide = {},
+	layoutCanCollide = {},
+	layoutAppearance = {},
+	layoutAnchored = {},
+	layoutCFrames = {},
+	layoutActive = false,
+	layoutKind = nil,
+	layoutBase = nil,
+	layoutStarted = 0,
+	layoutAccumulator = 0,
+	elevatorRaised = false,
+	elevatorHeight = 100,
+	elevatorSpeed = 8,
+	elevatorCurrentY = 0,
+	yardCFrame = nil,
+	yardHomeY = 0,
+	yardDriveEnabled = false,
+	yardRise = false,
+	yardLower = false,
+	yardMoveSpeed = 14,
+	yardVerticalSpeed = 6,
+	yardLiftHeight = 100,
+	yardSmoothness = 4,
+	yardVelocity = Vector3.zero,
+	yardButtonVector = Vector3.zero,
+	yardButtonUntil = 0,
+	yardNudgeDistance = 12,
+	yardFenceRoots = {},
+	yardRoots = {},
+	placingMode = nil,
+	placementDragging = false,
+	placementGroundY = 0,
+	placementHeight = 0,
+	placementCFrame = nil,
+	previewFolder = nil,
+	previousMouseTargetFilter = nil,
+	meteorActive = false,
+	meteorThrown = false,
+	meteorImpactTorso = nil,
+	meteorCenter = nil,
+	meteorDirection = Vector3.zero,
+	meteorThrowStarted = 0,
+	meteorAngle = 0,
+	meteorLastClick = 0,
+	meteorAccumulator = 0,
+	meteorRadius = 11,
+	meteorHeight = 24,
+	meteorSpeed = 135,
+	summonStarted = 0,
+	shoulderMotor = nil,
+	shoulderTransform = nil,
+	safeCFrame = nil,
+	lastSafeUpdate = 0,
+	lastScan = 0,
+	lastRadiusUpdate = 0,
+	lastStatusUpdate = 0,
+	moved = 0,
+	unowned = 0,
+	welded = 0,
+	savedSimulationRadius = nil,
+	savedMaxSimulationRadius = nil,
+	seatDetectionEnabled = false,
+	seatTeleportBusy = false,
+	seatScanAccumulator = 0,
+	unanchoredSeats = {},
+}
+
+local function playerOption(player)
+	return string.format("%s (@%s)", player.DisplayName, player.Name)
+end
+
+local function getPlayerOptions(excludeLocal)
+	local options = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if not excludeLocal or player ~= LocalPlayer then
+			table.insert(options, playerOption(player))
+		end
+	end
+	table.sort(options)
+	return options
+end
+
+local function usernameFromOption(value)
+	local text = tostring(value or "")
+	return text:match("%(@([^%)]+)%)") or text
+end
+
+local Window = ClearCompat.CreateWindow({
+	Title = "NDS Part Control",
+	GuiName = "ClearNDSPartControl",
+	ToggleKey = Enum.KeyCode.LeftAlt,
+	Size = Vector2.new(700, 450),
+})
+
+local PartsTab = Window:CreateTab({ Name = "Parts", Icon = "Parts" })
+local BuildTab = Window:CreateTab({ Name = "Build", Icon = "Build" })
+local PlayerTab = Window:CreateTab({ Name = "Player", Icon = "Player" })
+local SeatsTab = Window:CreateTab({ Name = "Seats", Icon = "Seats" })
+local SettingsTab = Window:CreateTab({ Name = "Settings", Icon = "Settings" })
+
+local TargetSection = PartsTab:CreateSection({
+	Title = "Target Player",
+	Description = "username or display name",
+	Side = "Left",
+})
+
+local ControlSection = PartsTab:CreateSection({
+	Title = "Part Controls",
+	Description = "shared unanchored map assemblies",
+	Side = "Right",
+})
+
+local BringToggle
+local OrbitToggle
+local MeteorToggle
+local ElevatorLiftToggle
+local YardDriveToggle
+local YardRiseToggle
+local YardLowerToggle
+local SeatDetectorToggle
+local SeatPlayerDropdown
+local SeatStatusLabel
+local stopPlacement
+local stopLayout
+local stopMeteor
+local stopAllPartModes
+
+local TargetField = TargetSection:AddDropdown({
+	Name = "Username / Display Name",
+	Options = getPlayerOptions(false),
+	Default = playerOption(LocalPlayer),
+	Open = false,
+	Callback = function(value)
+		state.targetText = usernameFromOption(value)
+	end,
+})
+
+local TargetStatus = TargetSection:AddInput({
+	Name = "Resolved Target",
+	Default = LocalPlayer.DisplayName .. " (@" .. LocalPlayer.Name .. ")",
+})
+
+local PartStatus = TargetSection:AddInput({
+	Name = "Part Status",
+	Default = "Ready to scan workspace.Structure",
+})
+
+local function notify(title, content)
+	Window:Notify({
+		Title = title,
+		Content = content,
+		Duration = 3,
+	})
+end
+
+local BLUE_HAMMER_NAME = "Blue Hammer"
+local BLUE_HAMMER_MARKER = "ZenthraNDSBlueHammer"
+local BLUE_HAMMER_VERSION = 2
+local BLUE_HAMMER_MAX_PARTS = 750
+
+local function findBlueHammer()
+	local containers = { LocalPlayer.Character, LocalPlayer:FindFirstChildOfClass("Backpack") }
+	for _, container in ipairs(containers) do
+		if container then
+			for _, child in ipairs(container:GetChildren()) do
+				if child:IsA("Tool") and (child.Name == BLUE_HAMMER_NAME or child:GetAttribute(BLUE_HAMMER_MARKER)) then
+					return child
+				end
+			end
+		end
+	end
+	return nil
+end
+
+local function flashHammerTarget(target, succeeded)
+	if not target or not target.Parent then return end
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "ClearHammerHit"
+	highlight.Adornee = target
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.FillColor = succeeded and Color3.fromRGB(105, 205, 255) or Color3.fromRGB(255, 134, 134)
+	highlight.FillTransparency = 0.55
+	highlight.OutlineColor = Color3.fromRGB(245, 250, 255)
+	highlight.OutlineTransparency = 0.05
+	highlight.Parent = PlayerGui
+	task.delay(0.45, function()
+		if highlight.Parent then highlight:Destroy() end
+	end)
+end
+
+local function unanchorWithBlueHammer(target, showNotification)
+	local structure = workspace:FindFirstChild("Structure")
+	if not target or not target:IsA("BasePart") then
+		if showNotification then notify("Blue Hammer", "Aim at an anchored map part, then click.") end
+		return 0, 0
+	end
+	if not structure or not target:IsDescendantOf(structure) then
+		flashHammerTarget(target, false)
+		if showNotification then notify("Blue Hammer", "That part is outside workspace.Structure.") end
+		return 0, 0
+	end
+
+	local connected = { target }
+	local ok, result = pcall(function()
+		return target:GetConnectedParts(true)
+	end)
+	if ok and type(result) == "table" then
+		connected = result
+		table.insert(connected, target)
+	end
+
+	local seen = {}
+	local changed = 0
+	local considered = 0
+	for _, part in ipairs(connected) do
+		if considered >= BLUE_HAMMER_MAX_PARTS then break end
+		if part:IsA("BasePart") and part:IsDescendantOf(structure) and not seen[part] then
+			seen[part] = true
+			considered = considered + 1
+			if part.Anchored then
+				local unanchored = pcall(function()
+					part.Anchored = false
+					part.AssemblyLinearVelocity = Vector3.zero
+					part.AssemblyAngularVelocity = Vector3.zero
+				end)
+				if unanchored and not part.Anchored then
+					changed = changed + 1
+				end
+			end
+		end
+	end
+
+	flashHammerTarget(target, changed > 0)
+	if showNotification then
+		if changed > 0 then
+			local suffix = #connected > BLUE_HAMMER_MAX_PARTS and " (safety limit reached)" or ""
+			notify("Blue Hammer", string.format("Unanchored %d connected Structure part%s.%s", changed, changed == 1 and "" or "s", suffix))
+		else
+			notify("Blue Hammer", "This assembly is already unanchored or the server restored it.")
+		end
+	end
+	return changed, considered
+end
+
+local function giveBlueHammer()
+	local backpack = LocalPlayer:FindFirstChildOfClass("Backpack") or LocalPlayer:WaitForChild("Backpack", 3)
+	local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not backpack then
+		notify("Blue Hammer", "Your Backpack is not available yet.")
+		return
+	end
+
+	local existing = findBlueHammer()
+	if existing and existing:GetAttribute("ClearFunctionalHammerVersion") ~= BLUE_HAMMER_VERSION then
+		existing:Destroy()
+		existing = nil
+	end
+	if existing then
+		if humanoid and existing.Parent == backpack then
+			humanoid:EquipTool(existing)
+		end
+		notify("Blue Hammer", "The functional hammer was already in your inventory, so it was equipped.")
+		return
+	end
+
+	local tool = Instance.new("Tool")
+	tool.Name = BLUE_HAMMER_NAME
+	tool.ToolTip = "Click an anchored Structure part to unanchor its connected assembly"
+	tool.TextureId = "rbxassetid://109407938820554"
+	tool.CanBeDropped = false
+	tool.RequiresHandle = true
+	tool:SetAttribute(BLUE_HAMMER_MARKER, true)
+	tool:SetAttribute("ClearFunctionalHammerVersion", BLUE_HAMMER_VERSION)
+
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(0.42, 3.2, 0.42)
+	handle.Color = Color3.fromRGB(35, 48, 68)
+	handle.Material = Enum.Material.Metal
+	handle.CanCollide = false
+	handle.CanTouch = false
+	handle.CanQuery = false
+	handle.Massless = true
+	handle.TopSurface = Enum.SurfaceType.Smooth
+	handle.BottomSurface = Enum.SurfaceType.Smooth
+	handle.Parent = tool
+
+	local head = Instance.new("Part")
+	head.Name = "HammerHead"
+	head.Size = Vector3.new(2.7, 1.05, 1.05)
+	head.Color = Color3.fromRGB(34, 148, 255)
+	head.Material = Enum.Material.Neon
+	head.CanCollide = false
+	head.CanTouch = false
+	head.CanQuery = false
+	head.Massless = true
+	head.TopSurface = Enum.SurfaceType.Smooth
+	head.BottomSurface = Enum.SurfaceType.Smooth
+	head.CFrame = handle.CFrame * CFrame.new(0, 1.35, 0)
+	head.Parent = tool
+
+	local headWeld = Instance.new("WeldConstraint")
+	headWeld.Name = "HeadWeld"
+	headWeld.Part0 = handle
+	headWeld.Part1 = head
+	headWeld.Parent = head
+
+	local glow = Instance.new("PointLight")
+	glow.Name = "BlueGlow"
+	glow.Color = head.Color
+	glow.Brightness = 0.8
+	glow.Range = 7
+	glow.Shadows = false
+	glow.Parent = head
+
+	local unanchorTarget = Instance.new("BindableFunction")
+	unanchorTarget.Name = "UnanchorTarget"
+	unanchorTarget.OnInvoke = function(target)
+		return unanchorWithBlueHammer(target, false)
+	end
+	unanchorTarget.Parent = tool
+
+	local activationBusy = false
+	tool.Activated:Connect(function()
+		if activationBusy or tool.Parent ~= LocalPlayer.Character then return end
+		activationBusy = true
+		unanchorWithBlueHammer(Mouse.Target, true)
+		task.delay(0.18, function()
+			activationBusy = false
+		end)
+	end)
+
+	tool.Grip = CFrame.new(0, -1.05, 0)
+	tool.Parent = backpack
+	if humanoid then
+		humanoid:EquipTool(tool)
+	end
+	notify("Blue Hammer", "Functional unanchor hammer added. Aim at an anchored Structure part and click.")
+end
+
+local function removeBlueHammer()
+	local removed = 0
+	local containers = { LocalPlayer.Character, LocalPlayer:FindFirstChildOfClass("Backpack") }
+	for _, container in ipairs(containers) do
+		if container then
+			for _, child in ipairs(container:GetChildren()) do
+				if child:IsA("Tool") and (child.Name == BLUE_HAMMER_NAME or child:GetAttribute(BLUE_HAMMER_MARKER)) then
+					child:Destroy()
+					removed = removed + 1
+				end
+			end
+		end
+	end
+	notify("Blue Hammer", removed > 0 and "Removed from your inventory." or "No blue hammer was found.")
+end
+
+local function trim(value)
+	return tostring(value or ""):match("^%s*(.-)%s*$")
+end
+
+local function resolvePlayer(query)
+	query = string.lower(trim(query))
+	if query == "" then
+		return nil
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if string.lower(player.Name) == query or string.lower(player.DisplayName) == query then
+			return player
+		end
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if string.sub(string.lower(player.Name), 1, #query) == query
+			or string.sub(string.lower(player.DisplayName), 1, #query) == query then
+			return player
+		end
+	end
+
+	return nil
+end
+
+local function getRootPart(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if humanoid and humanoid.Health > 0 and root and root:IsA("BasePart") then
+		return root
+	end
+	return nil
+end
+
+local function getTargetTorso(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return nil
+	end
+	local torso = character:FindFirstChild("UpperTorso")
+		or character:FindFirstChild("Torso")
+		or character:FindFirstChild("HumanoidRootPart")
+	if torso and torso:IsA("BasePart") then
+		return torso
+	end
+	return nil
+end
+
+local function resolveTarget(showNotification)
+	state.targetText = usernameFromOption(TargetField:Get())
+	local player = resolvePlayer(state.targetText)
+	state.target = player
+
+	if player then
+		TargetStatus:Set(player.DisplayName .. " (@" .. player.Name .. ")", true)
+		if showNotification then
+			notify("Target Found", player.DisplayName .. " (@" .. player.Name .. ")")
+		end
+		return player
+	end
+
+	TargetStatus:Set("No matching player", true)
+	if showNotification then
+		notify("Target", "No player matched that username or display name.")
+	end
+	return nil
+end
+
+local function clearFlyPose()
+	for motor, originalTransform in pairs(state.flyPoseMotors) do
+		if motor.Parent then
+			motor.Transform = originalTransform
+		end
+	end
+	table.clear(state.flyPoseMotors)
+	if state.flyAnimateScript and state.flyAnimateScript.Parent and state.flyAnimateWasDisabled ~= nil then
+		state.flyAnimateScript.Disabled = state.flyAnimateWasDisabled
+	end
+	state.flyPoseCharacter = nil
+	state.flyAnimateScript = nil
+	state.flyAnimateWasDisabled = nil
+	state.flyStartedAt = 0
+end
+
+local function beginFlyPose(character)
+	clearFlyPose()
+	state.flyPoseCharacter = character
+	state.flyStartedAt = os.clock()
+	local animate = character:FindFirstChild("Animate")
+	if animate and animate:IsA("LocalScript") then
+		state.flyAnimateScript = animate
+		state.flyAnimateWasDisabled = animate.Disabled
+		animate.Disabled = true
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+			pcall(function() track:Stop(0.18) end)
+		end
+	end
+	for _, motor in ipairs(character:QueryDescendants("Motor6D, AnimationConstraint")) do
+		state.flyPoseMotors[motor] = motor.Transform
+	end
+end
+
+local function flyMotorOffset(motorName, elapsed)
+	local compactName = string.lower(string.gsub(motorName, "%s+", ""))
+	local breathe = math.sin(elapsed * 2.2)
+	if string.find(compactName, "rightshoulder", 1, true) then
+		return CFrame.Angles(math.rad(-18 + breathe * 3), math.rad(6), math.rad(32))
+	end
+	if string.find(compactName, "leftshoulder", 1, true) then
+		return CFrame.Angles(math.rad(-18 + breathe * 3), math.rad(-6), math.rad(-32))
+	end
+	if string.find(compactName, "righthip", 1, true) then
+		return CFrame.Angles(math.rad(-16 - breathe * 2), 0, math.rad(10))
+	end
+	if string.find(compactName, "lefthip", 1, true) then
+		return CFrame.Angles(math.rad(-16 - breathe * 2), 0, math.rad(-10))
+	end
+	if compactName == "root" or compactName == "rootjoint" then
+		return CFrame.new(0, math.sin(elapsed * 1.8) * 0.12, 0)
+			* CFrame.Angles(math.rad(5 + breathe * 1.5), 0, math.rad(math.sin(elapsed * 1.3) * 2))
+	end
+	if compactName == "neck" then
+		return CFrame.Angles(math.rad(-4 - breathe), 0, 0)
+	end
+	return CFrame.identity
+end
+
+local function updateFlyPose(character)
+	if state.flyPoseCharacter ~= character then
+		beginFlyPose(character)
+	end
+	local elapsed = os.clock() - state.flyStartedAt
+	for motor, originalTransform in pairs(state.flyPoseMotors) do
+		if motor.Parent then
+			local target = originalTransform * flyMotorOffset(motor.Name, elapsed)
+			motor.Transform = motor.Transform:Lerp(target, 0.16)
+		end
+	end
+end
+
+local function clearFlyMovers()
+	if state.flyVelocity then
+		state.flyVelocity:Destroy()
+		state.flyVelocity = nil
+	end
+	if state.flyGyro then
+		state.flyGyro:Destroy()
+		state.flyGyro = nil
+	end
+	state.flyCharacter = nil
+end
+
+local function stopFly(showNotification)
+	state.flyEnabled = false
+	clearFlyMovers()
+	clearFlyPose()
+	local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.PlatformStand = false
+		humanoid.AutoRotate = true
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+	end
+	if showNotification then
+		notify("Fly", "Disabled")
+	end
+end
+
+local function createFlyMovers()
+	local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root then
+		return false
+	end
+
+	clearFlyMovers()
+	local velocity = Instance.new("BodyVelocity")
+	velocity.Name = "ZenthraFlyVelocity"
+	velocity.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+	velocity.P = 20000
+	velocity.Velocity = Vector3.zero
+	velocity.Parent = root
+
+	local gyro = Instance.new("BodyGyro")
+	gyro.Name = "ZenthraFlyGyro"
+	gyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+	gyro.P = 30000
+	gyro.D = 650
+	gyro.CFrame = root.CFrame
+	gyro.Parent = root
+
+	humanoid.PlatformStand = true
+	humanoid.AutoRotate = false
+	state.flyVelocity = velocity
+	state.flyGyro = gyro
+	state.flyCharacter = character
+	beginFlyPose(character)
+	return true
+end
+
+local function startFly(showNotification)
+	state.flyEnabled = true
+	if not createFlyMovers() then
+		state.flyEnabled = false
+		if showNotification then
+			notify("Fly", "Your living character is not available.")
+		end
+		return false
+	end
+	if showNotification then
+		notify("Fly", "Enabled - use WASD, Space, and LeftCtrl.")
+	end
+	return true
+end
+
+local function updateFly()
+	if not state.flyEnabled then
+		return
+	end
+	local character = LocalPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid or humanoid.Health <= 0 then
+		clearFlyMovers()
+		clearFlyPose()
+		return
+	end
+	if state.flyCharacter ~= character or not state.flyVelocity or not state.flyVelocity.Parent then
+		if not createFlyMovers() then
+			return
+		end
+	end
+
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local direction = Vector3.zero
+	if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction = direction + camera.CFrame.LookVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction = direction - camera.CFrame.LookVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction = direction + camera.CFrame.RightVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction = direction - camera.CFrame.RightVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction = direction + Vector3.yAxis end
+	if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then direction = direction - Vector3.yAxis end
+	if direction.Magnitude > 1 then
+		direction = direction.Unit
+	end
+
+	state.flyVelocity.Velocity = direction * state.flySpeed
+	state.flyGyro.CFrame = CFrame.lookAt(root.Position, root.Position + camera.CFrame.LookVector, camera.CFrame.UpVector)
+	humanoid.PlatformStand = true
+end
+
+local NO_DAMAGE_HEALTH = 1000000000
+
+local function clearNoDamageGuard(restoreHumanoid)
+	if state.noDamageHealthConnection then
+		state.noDamageHealthConnection:Disconnect()
+		state.noDamageHealthConnection = nil
+	end
+	if state.noDamageDiedConnection then
+		state.noDamageDiedConnection:Disconnect()
+		state.noDamageDiedConnection = nil
+	end
+	if state.noDamageStateConnection then
+		state.noDamageStateConnection:Disconnect()
+		state.noDamageStateConnection = nil
+	end
+	if state.noDamageForceField and state.noDamageForceField.Parent then
+		state.noDamageForceField:Destroy()
+	end
+	state.noDamageForceField = nil
+
+	for part, canTouch in pairs(state.noDamageCanTouch) do
+		if part.Parent then
+			pcall(function() part.CanTouch = canTouch end)
+		end
+	end
+	table.clear(state.noDamageCanTouch)
+
+	local humanoid = state.noDamageHumanoid
+	local saved = state.noDamageSaved
+	if restoreHumanoid and humanoid and humanoid.Parent and saved then
+		pcall(function()
+			humanoid.BreakJointsOnDeath = saved.BreakJointsOnDeath
+			humanoid.RequiresNeck = saved.RequiresNeck
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, saved.DeadStateEnabled)
+			humanoid.MaxHealth = saved.MaxHealth
+			humanoid.Health = math.clamp(humanoid.Health, math.min(saved.MaxHealth, 1), saved.MaxHealth)
+		end)
+		LocalPlayer:SetAttribute("Health", math.min(100, humanoid.Health))
+	end
+	state.noDamageHumanoid = nil
+	state.noDamageSaved = nil
+	state.noDamageSafeCFrame = nil
+	state.noDamageTouchAccumulator = 0
+end
+
+local function enforceNoDamageVitals(humanoid)
+	if not humanoid or not humanoid.Parent then return false end
+	local ok = pcall(function()
+		humanoid.BreakJointsOnDeath = false
+		humanoid.RequiresNeck = false
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+		if humanoid.MaxHealth ~= NO_DAMAGE_HEALTH then
+			humanoid.MaxHealth = NO_DAMAGE_HEALTH
+		end
+		if humanoid.Health < NO_DAMAGE_HEALTH then
+			humanoid.Health = NO_DAMAGE_HEALTH
+		end
+		if humanoid:GetState() == Enum.HumanoidStateType.Dead then
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+	end)
+	if ok then
+		LocalPlayer:SetAttribute("Health", 100)
+	end
+	return ok
+end
+
+local function protectCharacterFromDamage(character)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return false end
+	clearNoDamageGuard(false)
+	state.noDamageHumanoid = humanoid
+	state.noDamageSaved = {
+		MaxHealth = humanoid.MaxHealth,
+		BreakJointsOnDeath = humanoid.BreakJointsOnDeath,
+		RequiresNeck = humanoid.RequiresNeck,
+		DeadStateEnabled = humanoid:GetStateEnabled(Enum.HumanoidStateType.Dead),
+	}
+	enforceNoDamageVitals(humanoid)
+
+	local forceField = Instance.new("ForceField")
+	forceField.Name = "ClearNoDamage"
+	forceField.Visible = false
+	forceField.Parent = character
+	state.noDamageForceField = forceField
+
+	state.noDamageHealthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+		if state.noDamage and state.noDamageHumanoid == humanoid and humanoid.Parent then
+			enforceNoDamageVitals(humanoid)
+		end
+	end)
+	state.noDamageDiedConnection = humanoid.Died:Connect(function()
+		if not state.noDamage or state.noDamageHumanoid ~= humanoid then return end
+		task.defer(function()
+			if not state.noDamage or state.noDamageHumanoid ~= humanoid or not humanoid.Parent then return end
+			enforceNoDamageVitals(humanoid)
+			local root = character:FindFirstChild("HumanoidRootPart")
+			if root and state.noDamageSafeCFrame then
+				root.CFrame = state.noDamageSafeCFrame * CFrame.new(0, 4, 0)
+				root.AssemblyLinearVelocity = Vector3.zero
+				root.AssemblyAngularVelocity = Vector3.zero
+			end
+		end)
+	end)
+	state.noDamageStateConnection = humanoid.StateChanged:Connect(function(_, newState)
+		if state.noDamage and state.noDamageHumanoid == humanoid and newState == Enum.HumanoidStateType.Dead then
+			task.defer(function()
+				if state.noDamage and state.noDamageHumanoid == humanoid and humanoid.Parent then
+					enforceNoDamageVitals(humanoid)
+				end
+			end)
+		end
+	end)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	state.noDamageSafeCFrame = root and root.CFrame or nil
+	return true
+end
+
+local function updateNoDamage(deltaTime)
+	if not state.noDamage then return end
+	local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+	if state.noDamageHumanoid ~= humanoid then
+		protectCharacterFromDamage(character)
+	end
+
+	enforceNoDamageVitals(humanoid)
+	if not state.noDamageForceField or state.noDamageForceField.Parent ~= character then
+		local forceField = Instance.new("ForceField")
+		forceField.Name = "ClearNoDamage"
+		forceField.Visible = false
+		forceField.Parent = character
+		state.noDamageForceField = forceField
+	end
+
+	state.noDamageTouchAccumulator = state.noDamageTouchAccumulator + (deltaTime or 0)
+	if state.noDamageTouchAccumulator >= 0.2 then
+		state.noDamageTouchAccumulator = 0
+		for _, part in ipairs(character:QueryDescendants("BasePart")) do
+			if state.noDamageCanTouch[part] == nil then
+				state.noDamageCanTouch[part] = part.CanTouch
+			end
+			part.CanTouch = false
+		end
+	end
+
+	local root = getRootPart(LocalPlayer)
+	if root then
+		local destroyHeight = workspace.FallenPartsDestroyHeight
+		if root.Position.Y <= destroyHeight + 25 and state.noDamageSafeCFrame then
+			root.CFrame = state.noDamageSafeCFrame * CFrame.new(0, 5, 0)
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		elseif humanoid.FloorMaterial ~= Enum.Material.Air and root.Position.Y > destroyHeight + 40 then
+			state.noDamageSafeCFrame = root.CFrame
+		end
+	end
+end
+
+local function stopNoDamage(showNotification)
+	state.noDamage = false
+	clearNoDamageGuard(true)
+	if showNotification then notify("No Damage", "Damage protection disabled and character properties restored.") end
+end
+
+local function saveSimulationRadius()
+	if state.savedSimulationRadius ~= nil then
+		return
+	end
+	if type(gethiddenproperty) == "function" then
+		local okRadius, radius = pcall(gethiddenproperty, LocalPlayer, "SimulationRadius")
+		local okMax, maxRadius = pcall(gethiddenproperty, LocalPlayer, "MaximumSimulationRadius")
+		if okRadius then
+			state.savedSimulationRadius = radius
+		end
+		if okMax then
+			state.savedMaxSimulationRadius = maxRadius
+		end
+	end
+end
+
+local function expandSimulationRadius()
+	saveSimulationRadius()
+	if type(sethiddenproperty) ~= "function" then
+		return false
+	end
+	-- NDS maps fit inside this finite radius; avoid an unnecessary infinite boundary.
+	local requestedRadius = 1000
+	local okRadius = pcall(sethiddenproperty, LocalPlayer, "SimulationRadius", requestedRadius)
+	local okMax = pcall(sethiddenproperty, LocalPlayer, "MaximumSimulationRadius", requestedRadius)
+	return okRadius or okMax
+end
+
+local function expandSeatSimulationRadius()
+	saveSimulationRadius()
+	if type(sethiddenproperty) ~= "function" then
+		return false
+	end
+	-- Seat ownership can be re-evaluated every physics step. Keep both hidden
+	-- radii raised for the entire attempt instead of setting them only once.
+	local okRadius = pcall(sethiddenproperty, LocalPlayer, "SimulationRadius", math.huge)
+	local okMax = pcall(sethiddenproperty, LocalPlayer, "MaximumSimulationRadius", math.huge)
+	return okRadius or okMax
+end
+
+local function restoreSimulationRadius()
+	if type(sethiddenproperty) ~= "function" then
+		return
+	end
+	if state.savedSimulationRadius ~= nil then
+		pcall(sethiddenproperty, LocalPlayer, "SimulationRadius", state.savedSimulationRadius)
+	end
+	if state.savedMaxSimulationRadius ~= nil then
+		pcall(sethiddenproperty, LocalPlayer, "MaximumSimulationRadius", state.savedMaxSimulationRadius)
+	end
+end
+
+local function isOwned(part)
+	if type(isnetworkowner) ~= "function" then
+		return true
+	end
+	local ok, owned = pcall(isnetworkowner, part)
+	return ok and owned == true
+end
+
+local function scanAssemblies()
+	local structure = workspace:FindFirstChild("Structure")
+	if not structure then
+		state.roots = {}
+		return 0, 0
+	end
+
+	local unique = {}
+	local weldedRoots = {}
+	local roots = {}
+	local partCount = 0
+	for _, part in ipairs(structure:QueryDescendants("BasePart[Anchored = false]")) do
+		partCount = partCount + 1
+		local root = part.AssemblyRootPart or part
+		if root and root:IsDescendantOf(structure) and not root.Anchored and not unique[root] then
+			unique[root] = true
+			table.insert(roots, root)
+			if state.originalCFrames[root] == nil then
+				state.originalCFrames[root] = root.CFrame
+			end
+		elseif root and root.Anchored then
+			weldedRoots[root] = true
+		end
+	end
+
+	for root in pairs(state.frozenCFrames) do
+		if root.Parent and root:IsDescendantOf(structure) and not unique[root] then
+			unique[root] = true
+			table.insert(roots, root)
+		end
+	end
+
+	state.roots = roots
+	state.welded = 0
+	for _ in pairs(weldedRoots) do
+		state.welded = state.welded + 1
+	end
+	return partCount, #roots
+end
+
+local function zeroMotion(root)
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function updateSeatStatus(message)
+	if SeatStatusLabel then
+		SeatStatusLabel:Set(message)
+	end
+end
+
+local function seatAssemblyRoot(seat)
+	if not seat or not seat.Parent or seat.Anchored then
+		return nil
+	end
+	local root = seat.AssemblyRootPart or seat
+	if not root or not root:IsA("BasePart") or root.Anchored then
+		return nil
+	end
+	return root
+end
+
+local function scanUnanchoredSeats()
+	local seats = {}
+	local owned = 0
+	local ok, found = pcall(function()
+		return workspace:QueryDescendants("Seat[Anchored = false], VehicleSeat[Anchored = false]")
+	end)
+	if ok then
+		for _, seat in ipairs(found) do
+			local root = seatAssemblyRoot(seat)
+			if root then
+				table.insert(seats, seat)
+				if isOwned(root) then owned = owned + 1 end
+			end
+		end
+	end
+	state.unanchoredSeats = seats
+	if not state.seatTeleportBusy then
+		if #seats == 0 then
+			updateSeatStatus("No unanchored Seat or VehicleSeat exists on this map yet.")
+		else
+			updateSeatStatus(string.format("Detected %d unanchored seats | %d client-owned", #seats, owned))
+		end
+	end
+	return seats
+end
+
+local function selectedSeatPlayer()
+	if not SeatPlayerDropdown then return nil end
+	return resolvePlayer(usernameFromOption(SeatPlayerDropdown:Get()))
+end
+
+local function seatHasPlayer(seat, humanoid)
+	if not seat or not seat.Parent or not humanoid or not humanoid.Parent then
+		return false
+	end
+	if seat.Occupant == humanoid or humanoid.SeatPart == seat then
+		return true
+	end
+	local weld = seat:FindFirstChild("SeatWeld")
+	return weld ~= nil
+		and weld:IsA("Weld")
+		and weld.Part1 ~= nil
+		and weld.Part1:IsDescendantOf(humanoid.Parent)
+end
+
+local function touchSeatToPlayer(seat, character, targetRoot)
+	local touchFunction = getgenv().firetouchinterest or firetouchinterest
+	if type(touchFunction) ~= "function" then return end
+	local seen = {}
+	local candidates = {
+		targetRoot,
+		character:FindFirstChild("LowerTorso"),
+		character:FindFirstChild("Torso"),
+		character:FindFirstChild("LeftUpperLeg"),
+		character:FindFirstChild("RightUpperLeg"),
+		character:FindFirstChild("LeftLowerLeg"),
+		character:FindFirstChild("RightLowerLeg"),
+		character:FindFirstChild("LeftFoot"),
+		character:FindFirstChild("RightFoot"),
+		character:FindFirstChild("Left Leg"),
+		character:FindFirstChild("Right Leg"),
+	}
+	for _, touchPart in ipairs(candidates) do
+		if touchPart and touchPart:IsA("BasePart") and not seen[touchPart] then
+			seen[touchPart] = true
+			pcall(touchFunction, seat, touchPart, 0)
+			pcall(touchFunction, seat, touchPart, 1)
+		end
+	end
+end
+
+local function seatAssemblyPartCount(root)
+	local count = 1
+	pcall(function()
+		count = #root:GetConnectedParts(true) + 1
+	end)
+	return count
+end
+
+local function setSeatPosition(seat, root, desiredSeatCFrame, seatToRoot, velocity)
+	if not seat.Parent or not root.Parent then return false end
+	root.CFrame = desiredSeatCFrame * seatToRoot
+	root.AssemblyLinearVelocity = velocity or Vector3.new(0, 0.1, 0)
+	root.AssemblyAngularVelocity = Vector3.zero
+	return true
+end
+
+local function chooseSeatCandidate(player, humanoid, targetRoot)
+	local currentSeat = humanoid.SeatPart
+	if currentSeat and not currentSeat.Anchored
+		and (currentSeat:IsA("Seat") or currentSeat:IsA("VehicleSeat")) then
+		local currentRoot = seatAssemblyRoot(currentSeat)
+		if currentRoot then
+			return currentSeat, currentRoot
+		end
+	end
+
+	local ownedSeat
+	local ownedRoot
+	local ownedScore = math.huge
+	local fallbackSeat
+	local fallbackRoot
+	local fallbackScore = math.huge
+	local localRoot = getRootPart(LocalPlayer)
+	for _, seat in ipairs(scanUnanchoredSeats()) do
+		local root = seatAssemblyRoot(seat)
+		if root and (seat.Occupant == nil or seat.Occupant == humanoid) then
+			if isOwned(root) then
+				local distance = (seat.Position - targetRoot.Position).Magnitude
+				local score = seatAssemblyPartCount(root) * 1000 + distance
+				if score < ownedScore then
+					ownedSeat = seat
+					ownedRoot = root
+					ownedScore = score
+				end
+			else
+				local origin = localRoot and localRoot.Position or targetRoot.Position
+				local distance = (seat.Position - origin).Magnitude
+				local score = seatAssemblyPartCount(root) * 1000 + distance
+				if score < fallbackScore then
+					fallbackSeat = seat
+					fallbackRoot = root
+					fallbackScore = score
+				end
+			end
+		end
+	end
+	return ownedSeat or fallbackSeat, ownedRoot or fallbackRoot
+end
+
+local function tryClaimSeatOwnership(seat, root)
+	if isOwned(root) then return true end
+	local character = LocalPlayer.Character
+	local localRoot = getRootPart(LocalPlayer)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not localRoot or not humanoid or humanoid.Health <= 0 or seat.Occupant ~= nil then
+		return false
+	end
+
+	local returnCFrame = localRoot.CFrame
+	local returnLinearVelocity = localRoot.AssemblyLinearVelocity
+	local returnAngularVelocity = localRoot.AssemblyAngularVelocity
+	local returnPlatformStand = humanoid.PlatformStand
+	local deadline = os.clock() + 1.6
+	updateSeatStatus("Acquiring the loose seat; briefly moving near its assembly...")
+
+	while state.seatDetectionEnabled and state.seatTeleportBusy
+		and seat.Parent and root.Parent and not root.Anchored
+		and humanoid.Parent and humanoid.Health > 0 and seat.Occupant == nil
+		and os.clock() < deadline and not isOwned(root) do
+		expandSeatSimulationRadius()
+		localRoot.CFrame = CFrame.new(seat.Position + Vector3.new(0, math.max(12, seat.Size.Y + 8), 0))
+		localRoot.AssemblyLinearVelocity = Vector3.zero
+		localRoot.AssemblyAngularVelocity = Vector3.zero
+		humanoid.PlatformStand = true
+		RunService.Heartbeat:Wait()
+	end
+
+	if localRoot.Parent then
+		localRoot.CFrame = returnCFrame
+		localRoot.AssemblyLinearVelocity = returnLinearVelocity
+		localRoot.AssemblyAngularVelocity = returnAngularVelocity
+	end
+	if humanoid.Parent then humanoid.PlatformStand = returnPlatformStand end
+	return root.Parent ~= nil and isOwned(root)
+end
+
+local function teleportSelectedPlayerWithSeat()
+	if state.seatTeleportBusy then
+		notify("Seat Teleport", "The seat is already following the selected player.")
+		return
+	end
+	local player = selectedSeatPlayer()
+	if not player or player == LocalPlayer then
+		notify("Seat Teleport", "Choose another player from the dropdown first.")
+		return
+	end
+
+	state.seatDetectionEnabled = true
+	state.seatTeleportBusy = true
+	state.seatScanAccumulator = 0
+	if SeatDetectorToggle then SeatDetectorToggle:Set(true, true) end
+	task.spawn(function()
+		local success = false
+		local ok, failure = xpcall(function()
+			expandSeatSimulationRadius()
+			while state.seatDetectionEnabled and state.seatTeleportBusy and player.Parent and not success do
+				local character = player.Character
+				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+				local targetRoot = getRootPart(player)
+				if not humanoid or not targetRoot then
+					updateSeatStatus("Waiting for " .. player.DisplayName .. " to respawn...")
+					task.wait(0.35)
+					continue
+				end
+
+				local seat, root = chooseSeatCandidate(player, humanoid, targetRoot)
+				if not seat or not root then
+					updateSeatStatus("This map has no free unanchored seats. Waiting for one to appear...")
+					task.wait(0.35)
+					continue
+				end
+				if not isOwned(root) and not tryClaimSeatOwnership(seat, root) then
+					updateSeatStatus("Roblox kept this seat server-owned. Retrying the next available seat...")
+					task.wait(0.35)
+					continue
+				end
+				targetRoot = getRootPart(player)
+				if not targetRoot then continue end
+
+				local seatToRoot = seat.CFrame:ToObjectSpace(root.CFrame)
+				local occupantConnection
+				local seatWeldConnection
+				local assemblyCollision = {}
+				local function restoreSeatAssemblyCollision()
+					for part, properties in pairs(assemblyCollision) do
+						if part.Parent then
+							pcall(function()
+								part.CanCollide = properties.CanCollide
+								part.CanTouch = properties.CanTouch
+							end)
+						end
+					end
+					table.clear(assemblyCollision)
+				end
+				local function disconnectOccupantConnection()
+					if occupantConnection then
+						occupantConnection:Disconnect()
+						occupantConnection = nil
+					end
+					if seatWeldConnection then
+						seatWeldConnection:Disconnect()
+						seatWeldConnection = nil
+					end
+				end
+				local function snapOccupiedSeatToLocalPlayer()
+					if not seatHasPlayer(seat, humanoid) then return false end
+					local localRoot = getRootPart(LocalPlayer)
+					if not localRoot or not seat.Parent or not root.Parent then return false end
+					local destination = localRoot.CFrame * CFrame.new(0, -2.65, -6)
+					return setSeatPosition(seat, root, destination, seatToRoot,
+						localRoot.AssemblyLinearVelocity + Vector3.new(0, 0.1, 0))
+				end
+				occupantConnection = seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+					-- Seat network ownership can transfer as soon as another player sits.
+					-- Move it in the same property-change frame while our client still has a chance.
+					if state.seatDetectionEnabled and state.seatTeleportBusy then
+						snapOccupiedSeatToLocalPlayer()
+					end
+				end)
+				seatWeldConnection = seat.ChildAdded:Connect(function(child)
+					if child.Name == "SeatWeld" and state.seatDetectionEnabled and state.seatTeleportBusy then
+						snapOccupiedSeatToLocalPlayer()
+					end
+				end)
+				pcall(function()
+					local connectedParts = root:GetConnectedParts(true)
+					table.insert(connectedParts, root)
+					for _, part in ipairs(connectedParts) do
+						if part ~= seat then
+							assemblyCollision[part] = {
+								CanCollide = part.CanCollide,
+								CanTouch = part.CanTouch,
+							}
+							part.CanCollide = false
+							part.CanTouch = false
+						end
+					end
+					seat.Disabled = false
+					seat.CanTouch = true
+					seat.CanCollide = true
+				end)
+				local sweepStarted = os.clock()
+				local lastTouchAttempt = -math.huge
+				while state.seatDetectionEnabled and state.seatTeleportBusy
+					and seat.Parent and root.Parent and not root.Anchored
+					and humanoid.Parent and humanoid.Health > 0
+					and not seatHasPlayer(seat, humanoid) do
+					targetRoot = getRootPart(player)
+					if not targetRoot or not isOwned(root) then break end
+					local elapsed = os.clock() - sweepStarted
+					local look = Vector3.new(targetRoot.CFrame.LookVector.X, 0, targetRoot.CFrame.LookVector.Z)
+					if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) else look = look.Unit end
+					local basis = CFrame.lookAt(targetRoot.Position, targetRoot.Position + look)
+					local desiredSeat
+					if elapsed < 0.65 then
+						-- A short visible approach only. Never spin while asking Roblox to seat.
+						local alpha = math.clamp(elapsed / 0.65, 0, 1)
+						local orbitRadius = (1 - alpha) * 3
+						local orbitAngle = elapsed * math.rad(420)
+						local spinAngle = elapsed * math.rad(540)
+						desiredSeat = basis
+							* CFrame.new(math.cos(orbitAngle) * orbitRadius, -2.8, math.sin(orbitAngle) * orbitRadius)
+							* CFrame.Angles(0, spinAngle, 0)
+						updateSeatStatus("Seat is approaching " .. player.DisplayName .. "...")
+					else
+						-- Live NDS seats with real SeatWelds sit about 1.7 studs below HRP.
+						-- Sweep upward once, then hold perfectly still relative to the target.
+						local seatElapsed = elapsed - 0.65
+						local height = -2.8 + math.clamp(seatElapsed / 0.55, 0, 1) * 1.1
+						desiredSeat = basis * CFrame.new(0, height, 0)
+						if os.clock() - lastTouchAttempt >= 0.08 then
+							lastTouchAttempt = os.clock()
+							pcall(function()
+								seat:Sit(humanoid)
+								humanoid.Sit = true
+							end)
+							touchSeatToPlayer(seat, character, targetRoot)
+						end
+						updateSeatStatus("Seat is locked under " .. player.DisplayName .. " and waiting for SeatWeld...")
+					end
+					setSeatPosition(seat, root, desiredSeat, seatToRoot,
+						targetRoot.AssemblyLinearVelocity)
+					if seatHasPlayer(seat, humanoid) then
+						-- Do not yield a physics frame before the first occupied-seat move.
+						snapOccupiedSeatToLocalPlayer()
+						break
+					end
+					RunService.Heartbeat:Wait()
+				end
+
+				if seatHasPlayer(seat, humanoid) then
+					updateSeatStatus(player.DisplayName .. " is seated. Bringing the occupied seat to you...")
+					snapOccupiedSeatToLocalPlayer()
+					while state.seatDetectionEnabled and state.seatTeleportBusy
+						and seat.Parent and root.Parent and seatHasPlayer(seat, humanoid) do
+						local localRoot = getRootPart(LocalPlayer)
+						targetRoot = getRootPart(player)
+						if not localRoot then
+							updateSeatStatus("Waiting for your character to respawn...")
+							task.wait(0.2)
+						elseif targetRoot and (targetRoot.Position - localRoot.Position).Magnitude <= 24 then
+							success = true
+							break
+						else
+							snapOccupiedSeatToLocalPlayer()
+							RunService.Heartbeat:Wait()
+						end
+					end
+				end
+				disconnectOccupantConnection()
+				restoreSeatAssemblyCollision()
+			end
+		end, debug.traceback)
+
+		state.seatTeleportBusy = false
+		if success then
+			updateSeatStatus("Teleported " .. player.DisplayName .. " to you while seated.")
+			notify("Seat Teleport", player.DisplayName .. " was brought to you.")
+		elseif not state.seatDetectionEnabled then
+			updateSeatStatus("Seat teleport cancelled by the toggle.")
+		elseif not ok then
+			local message = tostring(failure):match("^[^\n]+") or tostring(failure)
+			updateSeatStatus("Seat teleport stopped: " .. message)
+			notify("Seat Teleport", message)
+		else
+			updateSeatStatus("Selected player left the server.")
+		end
+	end)
+end
+
+local function disableAssemblyCollision(root)
+	local ok, connected = pcall(root.GetConnectedParts, root, true)
+	if not ok then
+		connected = { root }
+	end
+	for _, part in ipairs(connected) do
+		if part:IsA("BasePart") and state.partCanCollide[part] == nil then
+			state.partCanCollide[part] = part.CanCollide
+			part.CanCollide = false
+		end
+	end
+end
+
+local function restorePartCollision()
+	for part, canCollide in pairs(state.partCanCollide) do
+		if part.Parent then
+			part.CanCollide = canCollide
+		end
+	end
+	table.clear(state.partCanCollide)
+end
+
+local function setLayoutCollision(root, enabled)
+	local ok, connected = pcall(root.GetConnectedParts, root, true)
+	if not ok then
+		connected = { root }
+	end
+	for _, part in ipairs(connected) do
+		if part:IsA("BasePart") then
+			if state.layoutCanCollide[part] == nil then
+				state.layoutCanCollide[part] = part.CanCollide
+			end
+			-- Complex vehicles and buildings can violently self-collide when packed
+			-- into a moving lift. Keep only each assembly root locally solid for
+			-- Elevator/yard assemblies may contain complex buildings and vehicles.
+			-- Keeping only their roots locally solid prevents packed debris from
+			-- self-colliding and launching riders while the deck is moving.
+			part.CanCollide = enabled and ((state.layoutKind ~= "elevator" and state.layoutKind ~= "yard") or part == root)
+			if state.layoutKind == "platform" or state.layoutKind == "yard" then
+				if state.layoutAppearance[part] == nil then
+					state.layoutAppearance[part] = {
+						Material = part.Material,
+						Color = part.Color,
+					}
+				end
+				if state.layoutKind == "yard" then
+					local isFence = state.yardFenceRoots[root] == true
+					part.Material = isFence and Enum.Material.WoodPlanks or Enum.Material.Grass
+					part.Color = isFence and Color3.fromRGB(116, 78, 48) or Color3.fromRGB(82, 142, 70)
+				else
+					part.Material = Enum.Material.Concrete
+					part.Color = Color3.fromRGB(135, 135, 140)
+				end
+			end
+		end
+	end
+end
+
+local function restoreLayoutCollision()
+	for part, canCollide in pairs(state.layoutCanCollide) do
+		if part.Parent then
+			part.CanCollide = canCollide
+		end
+	end
+	table.clear(state.layoutCanCollide)
+	for part, appearance in pairs(state.layoutAppearance) do
+		if part.Parent then
+			part.Material = appearance.Material
+			part.Color = appearance.Color
+		end
+	end
+	table.clear(state.layoutAppearance)
+end
+
+local function restoreAntiFlingCollision()
+	for part, canCollide in pairs(state.antiFlingCanCollide) do
+		if part.Parent then
+			part.CanCollide = canCollide
+		end
+	end
+	table.clear(state.antiFlingCanCollide)
+end
+
+local function applyAntiFling(now)
+	local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root then
+		state.safeCFrame = nil
+		return
+	end
+
+	local linearSpeed = root.AssemblyLinearVelocity.Magnitude
+	local angularSpeed = root.AssemblyAngularVelocity.Magnitude
+	if state.flyEnabled then
+		state.safeCFrame = root.CFrame
+		state.lastSafeUpdate = now
+	elseif linearSpeed < 45 and angularSpeed < 25 and now - state.lastSafeUpdate >= 0.15 then
+		state.safeCFrame = root.CFrame
+		state.lastSafeUpdate = now
+	elseif linearSpeed > 95 or angularSpeed > 55 then
+		for _, part in ipairs(character:QueryDescendants("BasePart")) do
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+		if state.safeCFrame then
+			root.CFrame = state.safeCFrame
+		end
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character then
+			for _, part in ipairs(player.Character:QueryDescendants("BasePart")) do
+				if state.antiFlingCanCollide[part] == nil then
+					state.antiFlingCanCollide[part] = part.CanCollide
+				end
+				part.CanCollide = false
+			end
+		end
+	end
+end
+
+local function driveRoot(root, desiredCFrame)
+	disableAssemblyCollision(root)
+	root.CFrame = desiredCFrame
+	-- A small continuous velocity keeps client-owned physics replication awake.
+	root.AssemblyLinearVelocity = Vector3.new(0, 0.1, 0)
+	root.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function placementOffset(index)
+	local zeroIndex = index - 1
+	local angle = zeroIndex * 2.399963229728653
+	local radius = math.min(12, math.sqrt(zeroIndex) * 1.5)
+	local height = state.verticalOffset + (zeroIndex % 4) * 1.5
+	return CFrame.new(math.cos(angle) * radius, height, math.sin(angle) * radius)
+end
+
+local function updateStatus(partCount, rootCount)
+	local mode
+	if state.placingMode then
+		mode = string.upper(state.placingMode) .. " PREVIEW"
+	elseif state.layoutActive then
+		if state.layoutKind == "elevator" then
+			local targetY = state.elevatorRaised and state.elevatorHeight or 0
+			if math.abs(state.elevatorCurrentY - targetY) <= 0.1 then
+				mode = state.elevatorRaised and "ELEVATOR TOP" or "ELEVATOR BOTTOM"
+			else
+				mode = state.elevatorRaised and "ELEVATOR RISING" or "ELEVATOR LOWERING"
+			end
+		elseif state.layoutKind == "yard" then
+			mode = (state.yardDriveEnabled or state.yardRise or state.yardLower or state.yardVelocity.Magnitude > 0.1)
+				and "YARD MOVING" or "YARD HOLD"
+		else
+			mode = string.upper(state.layoutKind or "BUILD")
+		end
+	elseif state.meteorActive then
+		if state.meteorImpactTorso then
+			mode = "METEOR IMPACT"
+		elseif state.meteorThrown then
+			mode = "METEOR THROWN"
+		else
+			mode = "SUMMONING METEOR"
+		end
+	elseif state.bringing then
+		local remaining = math.max(0, math.ceil(state.bringDelay - (os.clock() - state.bringStartTime)))
+		mode = remaining > 0 and ("COLLECTING " .. remaining .. "s") or "TORSO SPIN"
+	elseif state.orbiting then
+		mode = "ORBITING"
+	elseif state.freezing then
+		mode = "FROZEN"
+	else
+		mode = "STOPPED"
+	end
+	PartStatus:Set(string.format(
+		"%s | %d parts | %d movable | %d moved | %d waiting | %d welded",
+		mode,
+		partCount or 0,
+		rootCount or #state.roots,
+		state.moved,
+		state.unowned,
+		state.welded
+	), true)
+end
+
+local function stopBringing(showNotification)
+	state.bringing = false
+	state.bringStartTime = 0
+	state.bringSpinAngle = 0
+	for _, root in ipairs(state.roots) do
+		if root.Parent and isOwned(root) then
+			pcall(zeroMotion, root)
+		end
+	end
+	restorePartCollision()
+	state.moved = 0
+	state.unowned = 0
+	if not state.freezing then
+		restoreSimulationRadius()
+	end
+	if showNotification then
+		notify("Part Control", "Bringing stopped; parts were released in place.")
+	end
+end
+
+local function stopOrbiting(showNotification)
+	state.orbiting = false
+	for _, root in ipairs(state.roots) do
+		if root.Parent and isOwned(root) then
+			pcall(zeroMotion, root)
+		end
+	end
+	restorePartCollision()
+	state.moved = 0
+	state.unowned = 0
+	if not state.bringing and not state.freezing then
+		restoreSimulationRadius()
+	end
+	if showNotification then
+		notify("Circle Parts", "Orbit stopped and controlled parts were released.")
+	end
+end
+
+local function destroyPreview()
+	if state.previewFolder then
+		state.previewFolder:Destroy()
+		state.previewFolder = nil
+	end
+	if Mouse.TargetFilter and Mouse.TargetFilter.Name == "__ZenthraNDSPlacementPreview" then
+		Mouse.TargetFilter = state.previousMouseTargetFilter
+	end
+	state.previousMouseTargetFilter = nil
+end
+
+local function createGhostPart(parent, size, cframe)
+	local part = Instance.new("Part")
+	part.Name = "PlacementGhost"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Color = Color3.fromRGB(99, 220, 255)
+	part.Transparency = 0.62
+	part.Size = size
+	part.CFrame = cframe
+	part.Parent = parent
+	return part
+end
+
+local function renderPlacementPreview()
+	destroyPreview()
+	if not state.placingMode or not state.placementCFrame then
+		return
+	end
+
+	local folder = Instance.new("Folder")
+	folder.Name = "__ZenthraNDSPlacementPreview"
+	folder.Parent = workspace
+	state.previewFolder = folder
+	state.previousMouseTargetFilter = Mouse.TargetFilter
+	Mouse.TargetFilter = folder
+
+	if state.placingMode == "stairs" then
+		for step = 0, 31 do
+			local desired = state.placementCFrame * CFrame.new(0, step * 6, -step * 5)
+			createGhostPart(folder, Vector3.new(16, 1, 5), desired)
+		end
+	elseif state.placingMode == "elevator" then
+		createGhostPart(folder, Vector3.new(50, 1, 50), state.placementCFrame)
+	elseif state.placingMode == "yard" then
+		local tileIndex = 0
+		for row = -2, 2 do
+			for column = -2, 2 do
+				tileIndex = tileIndex + 1
+				local offset = CFrame.new(column * 12, 0, row * 12)
+				local ghost = createGhostPart(folder, Vector3.new(11.6, 1, 11.6), state.placementCFrame * offset)
+				ghost.Name = "YardTileGhost" .. tileIndex
+				ghost:SetAttribute("YardOffset", offset)
+			end
+		end
+		local fences = {
+			{ Vector3.new(60, 4, 2), CFrame.new(0, 2.5, -30) },
+			{ Vector3.new(60, 4, 2), CFrame.new(0, 2.5, 30) },
+			{ Vector3.new(2, 4, 60), CFrame.new(-30, 2.5, 0) },
+			{ Vector3.new(2, 4, 60), CFrame.new(30, 2.5, 0) },
+		}
+		for index, definition in ipairs(fences) do
+			local ghost = createGhostPart(folder, definition[1], state.placementCFrame * definition[2])
+			ghost.Name = "YardFenceGhost" .. index
+			ghost.Color = Color3.fromRGB(226, 184, 115)
+			ghost:SetAttribute("YardOffset", definition[2])
+		end
+	else
+		createGhostPart(folder, Vector3.new(100, 1, 100), state.placementCFrame)
+	end
+end
+
+local function updatePlacementFromMouse()
+	if not state.placingMode or not state.placementCFrame then
+		return
+	end
+	local localRoot = getRootPart(LocalPlayer)
+	if not localRoot then
+		return
+	end
+	local hitPosition = Mouse.Hit.Position
+	local flatOffset = Vector3.new(hitPosition.X - localRoot.Position.X, 0, hitPosition.Z - localRoot.Position.Z)
+	if flatOffset.Magnitude > 450 then
+		flatOffset = flatOffset.Unit * 450
+	end
+	local position = Vector3.new(
+		localRoot.Position.X + flatOffset.X,
+		state.placementGroundY + state.placementHeight,
+		localRoot.Position.Z + flatOffset.Z
+	)
+	local forward = state.placementCFrame.LookVector
+	state.placementCFrame = CFrame.lookAt(position, position + Vector3.new(forward.X, 0, forward.Z))
+	if state.previewFolder then
+		if state.placingMode == "stairs" then
+			local step = 0
+			for _, ghost in ipairs(state.previewFolder:GetChildren()) do
+				ghost.CFrame = state.placementCFrame * CFrame.new(0, step * 6, -step * 5)
+				step = step + 1
+			end
+		elseif state.placingMode == "yard" then
+			for _, ghost in ipairs(state.previewFolder:GetChildren()) do
+				local offset = ghost:GetAttribute("YardOffset")
+				if offset then ghost.CFrame = state.placementCFrame * offset end
+			end
+		else
+			local ghost = state.previewFolder:FindFirstChild("PlacementGhost")
+			if ghost then
+				ghost.CFrame = state.placementCFrame
+			end
+		end
+	end
+end
+
+stopPlacement = function(showNotification)
+	local wasPlacing = state.placingMode ~= nil
+	state.placingMode = nil
+	state.placementDragging = false
+	destroyPreview()
+	if showNotification and wasPlacing then
+		notify("Placement", "Preview cancelled; no map assemblies were moved.")
+	end
+end
+
+local function resetSummonArm()
+	if state.shoulderMotor and state.shoulderMotor.Parent and state.shoulderTransform then
+		state.shoulderMotor.Transform = state.shoulderTransform
+	end
+	state.shoulderMotor = nil
+	state.shoulderTransform = nil
+end
+
+local function beginSummonArm()
+	resetSummonArm()
+	local character = LocalPlayer.Character
+	local shoulder = character and character:FindFirstChild("RightShoulder", true)
+	if shoulder and shoulder:IsA("Motor6D") then
+		state.shoulderMotor = shoulder
+		state.shoulderTransform = shoulder.Transform
+	end
+end
+
+stopLayout = function(showNotification)
+	local wasActive = state.layoutActive
+	local wasElevator = state.layoutKind == "elevator"
+	local wasYard = state.layoutKind == "yard"
+	state.layoutActive = false
+	state.layoutKind = nil
+	state.layoutBase = nil
+	state.layoutAccumulator = 0
+	state.elevatorRaised = false
+	state.elevatorCurrentY = 0
+	state.yardCFrame = nil
+	state.yardDriveEnabled = false
+	state.yardRise = false
+	state.yardLower = false
+	state.yardVelocity = Vector3.zero
+	state.yardButtonVector = Vector3.zero
+	state.yardButtonUntil = 0
+	if ElevatorLiftToggle then
+		ElevatorLiftToggle:Set(false, true)
+	end
+	if YardDriveToggle then YardDriveToggle:Set(false, true) end
+	if YardRiseToggle then YardRiseToggle:Set(false, true) end
+	if YardLowerToggle then YardLowerToggle:Set(false, true) end
+	for root in pairs(state.layoutAnchored) do
+		if root.Parent and isOwned(root) then
+			pcall(zeroMotion, root)
+		end
+		state.frozenCFrames[root] = nil
+	end
+	table.clear(state.layoutAnchored)
+	table.clear(state.layoutCFrames)
+	table.clear(state.yardFenceRoots)
+	table.clear(state.yardRoots)
+	restoreLayoutCollision()
+	state.freezing = next(state.frozenCFrames) ~= nil
+	if not state.bringing and not state.orbiting and not state.meteorActive and not state.freezing then
+		restoreSimulationRadius()
+	end
+	if showNotification and wasActive then
+		local stoppedName = wasElevator and "Elevator" or (wasYard and "Yard" or "Stairs/platform")
+		notify("Build Mode", stoppedName .. " stopped and assemblies were released.")
+	end
+end
+
+stopMeteor = function(showNotification)
+	local wasActive = state.meteorActive
+	state.meteorActive = false
+	state.meteorThrown = false
+	state.meteorImpactTorso = nil
+	state.meteorCenter = nil
+	state.meteorDirection = Vector3.zero
+	state.meteorAccumulator = 0
+	resetSummonArm()
+	restorePartCollision()
+	if not state.bringing and not state.orbiting and not state.layoutActive and not state.freezing then
+		restoreSimulationRadius()
+	end
+	if showNotification and wasActive then
+		notify("Meteor", "Meteor stopped and controlled assemblies were released.")
+	end
+end
+
+local function startPlacement(mode)
+	if not getRootPart(LocalPlayer) then
+		notify("Placement", "Your character is not available.")
+		return
+	end
+	if BringToggle then BringToggle:Set(false, true) end
+	if OrbitToggle then OrbitToggle:Set(false, true) end
+	if MeteorToggle then MeteorToggle:Set(false, true) end
+	stopBringing(false)
+	stopOrbiting(false)
+	stopMeteor(false)
+	stopLayout(false)
+	stopPlacement(false)
+
+	local root = getRootPart(LocalPlayer)
+	local look = workspace.CurrentCamera.CFrame.LookVector
+	look = Vector3.new(look.X, 0, look.Z)
+	if look.Magnitude < 0.01 then
+		look = Vector3.new(0, 0, -1)
+	else
+		look = look.Unit
+	end
+	local position = root.Position + look * 30 - Vector3.new(0, 3, 0)
+	state.placingMode = mode
+	state.placementGroundY = position.Y
+	state.placementHeight = 0
+	state.placementCFrame = CFrame.lookAt(position, position + look)
+	renderPlacementPreview()
+	local previewName = mode == "stairs" and "Stairs Preview"
+		or (mode == "elevator" and "Elevator Preview")
+		or (mode == "yard" and "Yard Preview")
+		or "Platform Preview"
+	notify(previewName, "Hold left mouse and drag. Use E/Q or the wheel for up/down, then press Done.")
+end
+
+local function yardDeckCount(count)
+	if count < 12 then
+		return math.max(1, count - math.max(1, math.floor(count * 0.18)))
+	end
+	return math.max(1, count - math.max(4, math.floor(count * 0.2)))
+end
+
+local function yardIsFenceIndex(index, count)
+	return index > yardDeckCount(count)
+end
+
+local function layoutCFrame(kind, base, index, count)
+	local zeroIndex = index - 1
+	if kind == "stairs" then
+		local steps = math.clamp(math.ceil(math.sqrt(count) * 3), 18, 36)
+		local lanes = math.max(1, math.ceil(count / steps))
+		local step = zeroIndex % steps
+		local lane = math.floor(zeroIndex / steps)
+		local x = (lane - (lanes - 1) / 2) * 6
+		return base * CFrame.new(x, step * 6, -step * 5)
+	end
+	if kind == "elevator" then
+		local columns = math.max(1, math.ceil(math.sqrt(count)))
+		local rows = math.max(1, math.ceil(count / columns))
+		local column = zeroIndex % columns
+		local row = math.floor(zeroIndex / columns)
+		local spacingX = columns <= 1 and 0 or math.clamp(48 / (columns - 1), 5, 10)
+		local spacingZ = rows <= 1 and 0 or math.clamp(48 / (rows - 1), 5, 10)
+		local x = (column - (columns - 1) / 2) * spacingX
+		local z = (row - (rows - 1) / 2) * spacingZ
+		return base * CFrame.new(x, 0, z)
+	end
+	if kind == "yard" then
+		local deckCount = yardDeckCount(count)
+		if index <= deckCount then
+			local columns = math.max(1, math.ceil(math.sqrt(deckCount)))
+			local rows = math.max(1, math.ceil(deckCount / columns))
+			local zeroDeck = index - 1
+			local column = zeroDeck % columns
+			local row = math.floor(zeroDeck / columns)
+			local spacingX = columns <= 1 and 0 or math.clamp(56 / (columns - 1), 5, 8)
+			local spacingZ = rows <= 1 and 0 or math.clamp(56 / (rows - 1), 5, 8)
+			local x = (column - (columns - 1) / 2) * spacingX
+			local z = (row - (rows - 1) / 2) * spacingZ
+			return base * CFrame.new(x, 0, z)
+		end
+		local fenceCount = math.max(1, count - deckCount)
+		local fenceIndex = index - deckCount - 1
+		local perimeter = (fenceIndex / fenceCount) * 4
+		local side = math.floor(perimeter) % 4
+		local alpha = perimeter - math.floor(perimeter)
+		local coordinate = -28 + alpha * 56
+		if side == 0 then return base * CFrame.new(coordinate, 2.5, -29) end
+		if side == 1 then return base * CFrame.new(29, 2.5, coordinate) * CFrame.Angles(0, math.rad(90), 0) end
+		if side == 2 then return base * CFrame.new(-coordinate, 2.5, 29) end
+		return base * CFrame.new(-29, 2.5, -coordinate) * CFrame.Angles(0, math.rad(90), 0)
+	end
+	local columns = math.max(1, math.ceil(math.sqrt(count)))
+	local rows = math.max(1, math.ceil(count / columns))
+	local column = zeroIndex % columns
+	local row = math.floor(zeroIndex / columns)
+	local x = (column - (columns - 1) / 2) * 9
+	local z = (row - (rows - 1) / 2) * 9
+	return base * CFrame.new(x, 0, z)
+end
+
+local function commitPlacement()
+	if not state.placingMode or not state.placementCFrame then
+		notify("Placement", "Choose Stairs, Platform, Elevator, or Yard and position the preview first.")
+		return
+	end
+	stopLayout(false)
+	if not expandSimulationRadius() then
+		notify("Placement", "This executor cannot expand physics ownership.")
+		return
+	end
+	scanAssemblies()
+	if #state.roots == 0 then
+		notify("Placement", "No unanchored assemblies are available on this map.")
+		return
+	end
+	local kind = state.placingMode
+	local base = state.placementCFrame
+	state.layoutKind = kind
+	state.layoutBase = base
+	state.layoutActive = true
+	state.layoutStarted = os.clock()
+	state.layoutAccumulator = 0
+	state.elevatorRaised = false
+	state.elevatorCurrentY = 0
+	state.yardCFrame = kind == "yard" and base or nil
+	state.yardHomeY = base.Position.Y
+	state.yardDriveEnabled = false
+	state.yardRise = false
+	state.yardLower = false
+	state.yardVelocity = Vector3.zero
+	state.yardButtonVector = Vector3.zero
+	state.yardButtonUntil = 0
+	if ElevatorLiftToggle then ElevatorLiftToggle:Set(false, true) end
+	if YardDriveToggle then YardDriveToggle:Set(false, true) end
+	if YardRiseToggle then YardRiseToggle:Set(false, true) end
+	if YardLowerToggle then YardLowerToggle:Set(false, true) end
+	state.moved = 0
+	state.unowned = #state.roots
+	table.clear(state.yardFenceRoots)
+	if kind == "yard" then
+		state.yardRoots = table.clone(state.roots)
+	else
+		table.clear(state.yardRoots)
+	end
+	local layoutRoots = kind == "yard" and state.yardRoots or state.roots
+	for index, root in ipairs(layoutRoots) do
+		state.layoutCFrames[root] = layoutCFrame(kind, base, index, #layoutRoots)
+		if kind == "yard" and yardIsFenceIndex(index, #layoutRoots) then
+			state.yardFenceRoots[root] = true
+		end
+	end
+	stopPlacement(false)
+	local buildName = kind == "stairs" and "Building Stairs"
+		or (kind == "elevator" and "Building Elevator")
+		or (kind == "yard" and "Building Yard")
+		or "Building Platform"
+	notify(buildName, string.format("Holding owned assemblies with live physics so other players can see them. %d assemblies are queued; server-owned pieces remain waiting.", #state.roots))
+end
+
+local function startMeteor()
+	local root = getRootPart(LocalPlayer)
+	if not root then
+		notify("Meteor", "Your character is not available.")
+		return false
+	end
+	if BringToggle then BringToggle:Set(false, true) end
+	if OrbitToggle then OrbitToggle:Set(false, true) end
+	stopBringing(false)
+	stopOrbiting(false)
+	stopPlacement(false)
+	stopLayout(false)
+	if not expandSimulationRadius() then
+		notify("Meteor", "This executor cannot expand physics ownership.")
+		return false
+	end
+	scanAssemblies()
+	if #state.roots == 0 then
+		notify("Meteor", "No unanchored assemblies are available.")
+		return false
+	end
+	state.meteorActive = true
+	state.meteorThrown = false
+	state.meteorImpactTorso = nil
+	state.meteorCenter = root.Position + Vector3.new(0, state.meteorHeight, 0)
+	state.meteorDirection = Vector3.zero
+	state.meteorThrowStarted = 0
+	state.meteorAngle = 0
+	state.meteorAccumulator = 0
+	state.summonStarted = os.clock()
+	state.moved = 0
+	state.unowned = 0
+	beginSummonArm()
+	notify("Meteor", "Summoning above your head. Double-click the world to throw it.")
+	return true
+end
+
+local function throwMeteor()
+	if not state.meteorActive or state.meteorThrown then
+		return
+	end
+	local root = getRootPart(LocalPlayer)
+	if not root then
+		return
+	end
+	local center = state.meteorCenter or (root.Position + Vector3.new(0, state.meteorHeight, 0))
+	local direction = Mouse.Hit.Position - center
+	if direction.Magnitude < 5 then
+		direction = workspace.CurrentCamera.CFrame.LookVector
+	else
+		direction = direction.Unit
+	end
+	state.meteorCenter = center
+	state.meteorDirection = direction
+	state.meteorThrowStarted = os.clock()
+	state.meteorThrown = true
+	state.meteorImpactTorso = nil
+	resetSummonArm()
+	notify("Meteor", "Meteor thrown. Nearby player torsos trigger the impact orbit.")
+end
+
+stopAllPartModes = function(showNotification)
+	if BringToggle then BringToggle:Set(false, true) end
+	if OrbitToggle then OrbitToggle:Set(false, true) end
+	if MeteorToggle then MeteorToggle:Set(false, true) end
+	if ElevatorLiftToggle then ElevatorLiftToggle:Set(false, true) end
+	if YardDriveToggle then YardDriveToggle:Set(false, true) end
+	if YardRiseToggle then YardRiseToggle:Set(false, true) end
+	if YardLowerToggle then YardLowerToggle:Set(false, true) end
+	stopPlacement(false)
+	stopMeteor(false)
+	stopLayout(false)
+	stopOrbiting(false)
+	stopBringing(false)
+	for root in pairs(state.frozenCFrames) do
+		if root.Parent then
+			root.Anchored = false
+			pcall(zeroMotion, root)
+		end
+	end
+	table.clear(state.frozenCFrames)
+	state.freezing = false
+	restorePartCollision()
+	restoreLayoutCollision()
+	restoreSimulationRadius()
+	state.moved = 0
+	state.unowned = 0
+	if showNotification then
+		notify("Stop All", "All part, build, elevator, yard, preview, and meteor modes are stopped.")
+	end
+end
+
+local function updateLayout(deltaTime)
+	state.layoutAccumulator = state.layoutAccumulator + deltaTime
+	-- Keep client-owned assemblies physically awake. Anchoring here is only local
+	-- and prevents their transformed physics state from reaching other clients.
+	if state.layoutAccumulator < 1 / 30 then
+		return
+	end
+	local step = math.min(state.layoutAccumulator, 0.1)
+	state.layoutAccumulator = 0
+	local assemblyVelocity = Vector3.new(0, 0.08, 0)
+	if state.layoutKind == "elevator" and state.layoutBase then
+		local targetY = state.elevatorRaised and state.elevatorHeight or 0
+		local difference = targetY - state.elevatorCurrentY
+		local movement = 0
+		if math.abs(difference) > 0.01 then
+			movement = math.sign(difference) * math.min(math.abs(difference), state.elevatorSpeed * step)
+			state.elevatorCurrentY = state.elevatorCurrentY + movement
+		else
+			state.elevatorCurrentY = targetY
+		end
+		local verticalVelocity = math.abs(movement) > 0 and movement / math.max(step, 1 / 240) or 0.08
+		assemblyVelocity = Vector3.new(0, verticalVelocity, 0)
+		local movingBase = state.layoutBase * CFrame.new(0, state.elevatorCurrentY, 0)
+		table.clear(state.layoutCFrames)
+		for index, root in ipairs(state.roots) do
+			state.layoutCFrames[root] = layoutCFrame("elevator", movingBase, index, math.max(#state.roots, 1))
+		end
+	elseif state.layoutKind == "yard" and state.yardCFrame then
+		local currentCFrame = state.yardCFrame
+		local moveX, moveZ, moveY = 0, 0, 0
+		if state.yardDriveEnabled and not UserInputService:GetFocusedTextBox() then
+			if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveZ = moveZ - 1 end
+			if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveZ = moveZ + 1 end
+			if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveX = moveX - 1 end
+			if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveX = moveX + 1 end
+			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveY = moveY + 1 end
+			if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveY = moveY - 1 end
+		end
+		if os.clock() < state.yardButtonUntil then
+			moveX = moveX + state.yardButtonVector.X
+			moveZ = moveZ + state.yardButtonVector.Z
+		else
+			state.yardButtonVector = Vector3.zero
+		end
+		local currentHeight = currentCFrame.Position.Y - state.yardHomeY
+		if state.yardRise and currentHeight >= state.yardLiftHeight - 0.05 then
+			state.yardRise = false
+			if YardRiseToggle then YardRiseToggle:Set(false, true) end
+		end
+		if state.yardLower and currentHeight <= 0.05 then
+			state.yardLower = false
+			if YardLowerToggle then YardLowerToggle:Set(false, true) end
+		end
+		if state.yardRise and currentHeight < state.yardLiftHeight - 0.05 then moveY = moveY + 1 end
+		if state.yardLower and currentHeight > 0.05 then moveY = moveY - 1 end
+		local horizontal = Vector2.new(moveX, moveZ)
+		if horizontal.Magnitude > 1 then horizontal = horizontal.Unit end
+		local localHorizontal = Vector3.new(horizontal.X * state.yardMoveSpeed, 0, horizontal.Y * state.yardMoveSpeed)
+		local desiredVelocity = currentCFrame:VectorToWorldSpace(localHorizontal)
+			+ Vector3.new(0, math.clamp(moveY, -1, 1) * state.yardVerticalSpeed, 0)
+		local response = 1 - math.exp(-state.yardSmoothness * step)
+		state.yardVelocity = state.yardVelocity:Lerp(desiredVelocity, response)
+		if desiredVelocity.Magnitude < 0.01 and state.yardVelocity.Magnitude < 0.05 then
+			state.yardVelocity = Vector3.zero
+		end
+		local delta = state.yardVelocity * step
+		local nextY = math.clamp(currentCFrame.Position.Y + delta.Y, state.yardHomeY, state.yardHomeY + state.yardLiftHeight)
+		delta = Vector3.new(delta.X, nextY - currentCFrame.Position.Y, delta.Z)
+		if math.abs(delta.Y) < 0.0001 and math.abs(state.yardVelocity.Y) > 0 then
+			state.yardVelocity = Vector3.new(state.yardVelocity.X, 0, state.yardVelocity.Z)
+		end
+		state.yardCFrame = CFrame.new(delta) * currentCFrame
+		assemblyVelocity = state.yardVelocity.Magnitude > 0.01 and state.yardVelocity or Vector3.new(0, 0.08, 0)
+		table.clear(state.layoutCFrames)
+		table.clear(state.yardFenceRoots)
+		for index, root in ipairs(state.yardRoots) do
+			state.layoutCFrames[root] = layoutCFrame("yard", state.yardCFrame, index, math.max(#state.yardRoots, 1))
+			if yardIsFenceIndex(index, #state.yardRoots) then state.yardFenceRoots[root] = true end
+		end
+	end
+	local moved = 0
+	local unowned = 0
+	for root, desired in pairs(state.layoutCFrames) do
+		if root.Parent then
+			if isOwned(root) then
+				if root.Anchored then root.Anchored = false end
+				setLayoutCollision(root, true)
+				root.CFrame = desired
+				-- A tiny velocity prevents Roblox from putting the assembly to sleep,
+				-- while the repeated CFrame hold resists players and disasters.
+				root.AssemblyLinearVelocity = assemblyVelocity
+				root.AssemblyAngularVelocity = Vector3.zero
+				state.layoutAnchored[root] = true
+				moved = moved + 1
+			else
+				unowned = unowned + 1
+			end
+		end
+	end
+	state.freezing = false
+	state.moved = moved
+	state.unowned = unowned
+end
+
+local function startYardDirection(localDirection, label)
+	if not state.layoutActive or state.layoutKind ~= "yard" or not state.yardCFrame then
+		notify("Yard", "Place Yard - Drag Preview and press DONE first.")
+		return false
+	end
+	state.yardButtonVector = localDirection
+	state.yardButtonUntil = os.clock() + state.yardNudgeDistance / math.max(state.yardMoveSpeed, 1)
+	notify("Yard", label .. " Smooth movement started.")
+	return true
+end
+
+local function sphereOffset(index, count, radius, spinAngle)
+	local sample = (index - 0.5) / math.max(count, 1)
+	local y = 1 - sample * 2
+	local ring = math.sqrt(math.max(0, 1 - y * y))
+	local angle = index * 2.399963229728653 + spinAngle
+	return Vector3.new(math.cos(angle) * ring * radius, y * radius, math.sin(angle) * ring * radius)
+end
+
+local function findMeteorHit(center)
+	local nearestTorso
+	local nearestDistance = state.meteorRadius + 7
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local torso = getTargetTorso(player)
+			if torso then
+				local distance = (torso.Position - center).Magnitude
+				if distance <= nearestDistance then
+					nearestTorso = torso
+					nearestDistance = distance
+				end
+			end
+		end
+	end
+	return nearestTorso
+end
+
+local function updateSummonArm(now)
+	local shoulder = state.shoulderMotor
+	if not shoulder or not shoulder.Parent or not state.shoulderTransform then
+		return
+	end
+	local alpha = math.clamp((now - state.summonStarted) / 1.6, 0, 1)
+	local raised = state.shoulderTransform * CFrame.Angles(math.rad(-135), 0, math.rad(18))
+	shoulder.Transform = state.shoulderTransform:Lerp(raised, alpha)
+end
+
+local function updateMeteor(deltaTime, now)
+	state.meteorAccumulator = state.meteorAccumulator + deltaTime
+	if state.meteorAccumulator < 1 / 30 then
+		updateSummonArm(now)
+		return
+	end
+	local step = math.min(state.meteorAccumulator, 0.1)
+	state.meteorAccumulator = 0
+	local localRoot = getRootPart(LocalPlayer)
+	if not localRoot then
+		if MeteorToggle then MeteorToggle:Set(false, true) end
+		stopMeteor(false)
+		return
+	end
+
+	local center
+	local impact = state.meteorImpactTorso
+	if impact and impact.Parent and getTargetTorso(Players:GetPlayerFromCharacter(impact.Parent)) then
+		center = impact.Position
+		state.meteorAngle = state.meteorAngle + step * 36
+	elseif state.meteorThrown then
+		state.meteorImpactTorso = nil
+		state.meteorCenter = (state.meteorCenter or localRoot.Position) + state.meteorDirection * state.meteorSpeed * step + Vector3.new(0, -5 * step, 0)
+		center = state.meteorCenter
+		state.meteorAngle = state.meteorAngle + step * 25
+		local hitTorso = findMeteorHit(center)
+		if hitTorso then
+			state.meteorImpactTorso = hitTorso
+			center = hitTorso.Position
+			notify("Meteor Impact", "Assemblies are now spinning around " .. hitTorso.Parent.Name .. ".")
+		elseif now - state.meteorThrowStarted > 5 then
+			state.meteorThrown = false
+			state.meteorCenter = localRoot.Position + Vector3.new(0, state.meteorHeight, 0)
+			state.summonStarted = now
+			beginSummonArm()
+			center = state.meteorCenter
+			notify("Meteor", "Throw expired; the sphere returned above you.")
+		end
+	else
+		center = localRoot.Position + Vector3.new(0, state.meteorHeight, 0)
+		state.meteorCenter = center
+		state.meteorAngle = state.meteorAngle + step * 3
+		updateSummonArm(now)
+	end
+
+	local moved = 0
+	local unowned = 0
+	local count = math.max(#state.roots, 1)
+	local radius = state.meteorImpactTorso and 3.5 or state.meteorRadius
+	for index, root in ipairs(state.roots) do
+		if root.Parent then
+			if isOwned(root) then
+				if root.Anchored then root.Anchored = false end
+				local offset = sphereOffset(index, count, radius, state.meteorAngle)
+				local desired = CFrame.new(center + offset) * CFrame.Angles(
+					state.meteorAngle * 1.5,
+					state.meteorAngle + index * 0.2,
+					state.meteorAngle * 2
+				)
+				driveRoot(root, desired)
+				moved = moved + 1
+			else
+				unowned = unowned + 1
+			end
+		end
+	end
+	state.moved = moved
+	state.unowned = unowned
+end
+
+BringToggle = ControlSection:AddToggle({
+	Name = "Bring All Parts",
+	Tag = "B",
+	Default = false,
+	Flag = "BringAllParts",
+	Callback = function(enabled)
+		if not enabled then
+			stopBringing(true)
+			return
+		end
+		if MeteorToggle then MeteorToggle:Set(false, true) end
+		stopPlacement(false)
+		stopMeteor(false)
+		stopLayout(false)
+
+		local target = resolveTarget(false)
+		if not target or not getTargetTorso(target) then
+			notify("Bring Parts", "Target is missing or has no living character.")
+			BringToggle:Set(false, true)
+			state.bringing = false
+			return
+		end
+		stopOrbiting(false)
+		if OrbitToggle then
+			OrbitToggle:Set(false, true)
+		end
+
+		if not expandSimulationRadius() then
+			notify("Bring Parts", "This executor cannot expand physics ownership.")
+			BringToggle:Set(false, true)
+			return
+		end
+
+		state.target = target
+		state.bringing = true
+		state.bringStartTime = os.clock()
+		state.bringSpinAngle = 0
+		state.freezing = false
+		state.moved = 0
+		state.unowned = 0
+		scanAssemblies()
+		notify("Bring Parts", "Collecting ownership for 10 seconds, then spinning tightly around " .. target.Name .. "'s torso.")
+	end,
+})
+
+OrbitToggle = ControlSection:AddToggle({
+	Name = "Circle All Parts Around Me",
+	Tag = "O",
+	Default = false,
+	Flag = "OrbitAllParts",
+	Callback = function(enabled)
+		if not enabled then
+			stopOrbiting(true)
+			return
+		end
+		if MeteorToggle then MeteorToggle:Set(false, true) end
+		stopPlacement(false)
+		stopMeteor(false)
+		stopLayout(false)
+
+		if not getRootPart(LocalPlayer) then
+			notify("Circle Parts", "Your character is not available.")
+			OrbitToggle:Set(false, true)
+			return
+		end
+		if not expandSimulationRadius() then
+			notify("Circle Parts", "This executor cannot expand physics ownership.")
+			OrbitToggle:Set(false, true)
+			return
+		end
+
+		state.bringing = false
+		BringToggle:Set(false, true)
+		state.freezing = false
+		state.orbiting = true
+		state.orbitAngle = 0
+		state.moved = 0
+		state.unowned = 0
+		scanAssemblies()
+		notify("Circle Parts", "Owned detached assemblies are now orbiting you.")
+	end,
+})
+
+ControlSection:AddButton({
+	Name = "FORCE STOP ORBIT",
+	Callback = function()
+		OrbitToggle:Set(false, true)
+		stopOrbiting(true)
+	end,
+})
+
+ControlSection:AddButton({
+	Name = "Find Target",
+	Callback = function()
+		resolveTarget(true)
+	end,
+})
+
+ControlSection:AddButton({
+	Name = "Stop / Release Parts",
+	Callback = function()
+		stopAllPartModes(true)
+	end,
+})
+
+ControlSection:AddButton({
+	Name = "Anchor Parts (Local)",
+	Callback = function()
+		stopAllPartModes(false)
+		expandSimulationRadius()
+		scanAssemblies()
+		local anchored = 0
+		for _, root in ipairs(state.roots) do
+			if root.Parent and isOwned(root) then
+				zeroMotion(root)
+				state.frozenCFrames[root] = root.CFrame
+				root.Anchored = true
+				anchored = anchored + 1
+			end
+		end
+		state.freezing = true
+		notify("Anchor Parts", string.format("Locally anchored %d controlled assemblies.", anchored))
+	end,
+})
+
+ControlSection:AddButton({
+	Name = "Unanchor / Release Parts",
+	Callback = function()
+		local released = 0
+		for root in pairs(state.frozenCFrames) do
+			if root.Parent then released = released + 1 end
+		end
+		stopAllPartModes(false)
+		notify("Release Parts", string.format("Released %d assemblies.", released))
+	end,
+})
+
+ControlSection:AddButton({
+	Name = "Restore Original Positions",
+	Callback = function()
+		stopAllPartModes(false)
+		expandSimulationRadius()
+		local restored = 0
+		for root, originalCFrame in pairs(state.originalCFrames) do
+			if root.Parent then
+				root.Anchored = false
+				if isOwned(root) then
+					root.CFrame = originalCFrame
+					zeroMotion(root)
+					restored = restored + 1
+				end
+			end
+		end
+		table.clear(state.frozenCFrames)
+		state.freezing = false
+		restorePartCollision()
+		restoreSimulationRadius()
+		notify("Restore Parts", string.format("Restored %d owned assemblies.", restored))
+	end,
+})
+
+local SeatTargetSection = SeatsTab:CreateSection({
+	Title = "Selected Player",
+	Description = "choose who the occupied seat should bring",
+	Side = "Left",
+})
+
+local initialSeatPlayers = getPlayerOptions(true)
+SeatPlayerDropdown = SeatTargetSection:AddDropdown({
+	Name = "Player",
+	Options = initialSeatPlayers,
+	Default = initialSeatPlayers[1],
+	Open = false,
+})
+
+SeatTargetSection:AddButton({
+	Name = "Refresh Player List",
+	Callback = function()
+		local options = getPlayerOptions(true)
+		SeatPlayerDropdown:Refresh(options, false)
+		notify("Seat Teleport", "Player list refreshed.")
+	end,
+})
+
+local SeatControlSection = SeatsTab:CreateSection({
+	Title = "Unanchored Seat Teleport",
+	Description = "keeps trying until the selected player reaches you",
+	Side = "Right",
+})
+
+SeatDetectorToggle = SeatControlSection:AddToggle({
+	Name = "Detect Seats / Keep Trying",
+	Tag = "ON/OFF",
+	Default = false,
+	Callback = function(enabled)
+		state.seatDetectionEnabled = enabled
+		state.seatScanAccumulator = 0
+		if enabled then
+			scanUnanchoredSeats()
+		else
+			state.seatTeleportBusy = false
+			state.unanchoredSeats = {}
+			updateSeatStatus("Detector off; active seat teleport cancelled.")
+		end
+	end,
+})
+
+SeatStatusLabel = SeatControlSection:AddParagraph({
+	Content = "Detector off",
+})
+
+SeatControlSection:AddButton({
+	Name = "TELEPORT SELECTED PLAYER TO ME",
+	Callback = teleportSelectedPlayerWithSeat,
+})
+
+SeatControlSection:AddParagraph({
+	Content = "The button automatically enables detection. If needed, your character briefly moves near a loose seat to acquire physics ownership. The seat makes a short approach, stops rotating, sweeps upward to the real NDS seating height, and holds steady until Occupant/SeatWeld triggers the move back to you. Turn the toggle off to cancel.",
+})
+
+local BlueprintSection = BuildTab:CreateSection({
+	Title = "Draggable Blueprints",
+	Description = "preview first, then commit all available assemblies",
+	Side = "Left",
+})
+
+BlueprintSection:AddButton({
+	Name = "Stairs - Drag Preview",
+	Callback = function()
+		startPlacement("stairs")
+	end,
+})
+
+BlueprintSection:AddButton({
+	Name = "Concrete Platform - Drag Preview",
+	Callback = function()
+		startPlacement("platform")
+	end,
+})
+
+BlueprintSection:AddButton({
+	Name = "Elevator - Drag Preview",
+	Callback = function()
+		startPlacement("elevator")
+	end,
+})
+
+BlueprintSection:AddButton({
+	Name = "Yard - Drag Preview",
+	Callback = function()
+		startPlacement("yard")
+	end,
+})
+
+BlueprintSection:AddButton({
+	Name = "DONE - Build Here",
+	Callback = commitPlacement,
+})
+
+BlueprintSection:AddButton({
+	Name = "Move Preview Up",
+	Callback = function()
+		if state.placingMode then
+			state.placementHeight = state.placementHeight + 5
+			updatePlacementFromMouse()
+		end
+	end,
+})
+
+BlueprintSection:AddButton({
+	Name = "Move Preview Down",
+	Callback = function()
+		if state.placingMode then
+			state.placementHeight = state.placementHeight - 5
+			updatePlacementFromMouse()
+		end
+	end,
+})
+
+BlueprintSection:AddButton({
+	Name = "Cancel Preview",
+	Callback = function()
+		stopPlacement(true)
+	end,
+})
+
+BlueprintSection:AddParagraph({
+	Content = "Choose Stairs, Concrete, Elevator, or Yard. Hold left mouse and drag; E/Q or the wheel changes height. The Yard preview is a 5x5 tile ground with four low fences. Press DONE, then use the Yard controls.",
+	Height = 92,
+})
+
+local MeteorSection = BuildTab:CreateSection({
+	Title = "Sphere Meteor",
+	Description = "summon overhead, then double-click the world",
+	Side = "Right",
+})
+
+MeteorToggle = MeteorSection:AddToggle({
+	Name = "Summon Sphere Meteor",
+	Tag = "M",
+	Default = false,
+	Flag = "MeteorEnabled",
+	Callback = function(enabled)
+		if enabled then
+			if not startMeteor() then
+				MeteorToggle:Set(false, true)
+			end
+		else
+			stopMeteor(true)
+		end
+	end,
+})
+
+MeteorSection:AddSlider({
+	Name = "Meteor Height",
+	Min = 16,
+	Max = 60,
+	Default = 24,
+	Suffix = " studs",
+	Flag = "MeteorHeight",
+	Callback = function(value)
+		state.meteorHeight = value
+	end,
+})
+
+MeteorSection:AddSlider({
+	Name = "Meteor Size",
+	Min = 7,
+	Max = 18,
+	Default = 11,
+	Suffix = " studs",
+	Flag = "MeteorRadius",
+	Callback = function(value)
+		state.meteorRadius = value
+	end,
+})
+
+MeteorSection:AddSlider({
+	Name = "Throw Speed",
+	Min = 70,
+	Max = 220,
+	Default = 135,
+	Suffix = " studs/s",
+	Flag = "MeteorSpeed",
+	Callback = function(value)
+		state.meteorSpeed = value
+	end,
+})
+
+MeteorSection:AddButton({
+	Name = "STOP ALL PART MODES",
+	Callback = function()
+		stopAllPartModes(true)
+	end,
+})
+
+MeteorSection:AddParagraph({
+	Content = "The right arm rises during summoning. Double-click away from the GUI to throw. A nearby player torso triggers a fast impact orbit. Only assemblies your client owns can replicate.",
+	Height = 88,
+})
+
+local ElevatorSection = BuildTab:CreateSection({
+	Title = "Debris Elevator",
+	Description = "slow replicated lift made from owned assemblies",
+	Side = "Right",
+})
+
+ElevatorLiftToggle = ElevatorSection:AddToggle({
+	Name = "Raise Elevator Slowly",
+	Description = "toggle off to lower it back to the preview height",
+	Tag = "E",
+	Default = false,
+	Flag = "ElevatorRaised",
+	Callback = function(enabled)
+		if not state.layoutActive or state.layoutKind ~= "elevator" then
+			if enabled then
+				notify("Elevator", "Place Elevator - Drag Preview and press DONE first.")
+				ElevatorLiftToggle:Set(false, true)
+			end
+			return
+		end
+		state.elevatorRaised = enabled
+		notify("Elevator", enabled and "Rising slowly." or "Lowering slowly.")
+	end,
+})
+
+ElevatorSection:AddButton({
+	Name = "RAISE ELEVATOR",
+	Callback = function()
+		if state.layoutActive and state.layoutKind == "elevator" then
+			state.elevatorRaised = true
+			ElevatorLiftToggle:Set(true, true)
+			notify("Elevator", "Rising slowly.")
+		else
+			notify("Elevator", "Build the elevator first.")
+		end
+	end,
+})
+
+ElevatorSection:AddButton({
+	Name = "LOWER ELEVATOR",
+	Callback = function()
+		if state.layoutActive and state.layoutKind == "elevator" then
+			state.elevatorRaised = false
+			ElevatorLiftToggle:Set(false, true)
+			notify("Elevator", "Lowering slowly.")
+		else
+			notify("Elevator", "Build the elevator first.")
+		end
+	end,
+})
+
+ElevatorSection:AddSlider({
+	Name = "Lift Height",
+	Min = 20,
+	Max = 220,
+	Default = 100,
+	Suffix = " studs",
+	Flag = "ElevatorHeight",
+	Callback = function(value)
+		state.elevatorHeight = value
+	end,
+})
+
+ElevatorSection:AddSlider({
+	Name = "Lift Speed",
+	Min = 2,
+	Max = 24,
+	Default = 8,
+	Suffix = " studs/s",
+	Flag = "ElevatorSpeed",
+	Callback = function(value)
+		state.elevatorSpeed = value
+	end,
+})
+
+ElevatorSection:AddButton({
+	Name = "STOP ELEVATOR / RELEASE",
+	Callback = function()
+		if ElevatorLiftToggle then ElevatorLiftToggle:Set(false, true) end
+		stopLayout(true)
+	end,
+})
+
+ElevatorSection:AddParagraph({
+	Content = "Players can stand on collidable debris your client owns. The lift remains unanchored and moves gradually so its physics can replicate. Server-owned pieces stay listed as waiting.",
+	Height = 88,
+})
+
+local YardSection = BuildTab:CreateSection({
+	Title = "Moving Yard",
+	Description = "smooth tile ground, low fences, lift, and directional travel",
+	Side = "Right",
+})
+
+YardDriveToggle = YardSection:AddToggle({
+	Name = "Enable Yard Keyboard Drive",
+	Description = "W/S forward/back, A/D left/right, Space/Ctrl up/down",
+	Tag = "WASD",
+	Default = false,
+	Flag = "YardDriveEnabled",
+	Callback = function(enabled)
+		if enabled and (not state.layoutActive or state.layoutKind ~= "yard") then
+			notify("Yard", "Place Yard - Drag Preview and press DONE first.")
+			YardDriveToggle:Set(false, true)
+			return
+		end
+		state.yardDriveEnabled = enabled
+	end,
+})
+
+YardRiseToggle = YardSection:AddToggle({
+	Name = "Rise Yard Slowly",
+	Description = "smoothly rises toward the selected lift height",
+	Default = false,
+	Flag = "YardRise",
+	Callback = function(enabled)
+		if enabled and (not state.layoutActive or state.layoutKind ~= "yard") then
+			YardRiseToggle:Set(false, true)
+			notify("Yard", "Build the yard first.")
+			return
+		end
+		state.yardRise = enabled
+		if enabled then
+			state.yardLower = false
+			if YardLowerToggle then YardLowerToggle:Set(false, true) end
+		end
+	end,
+})
+
+YardLowerToggle = YardSection:AddToggle({
+	Name = "Lower Yard Slowly",
+	Description = "smoothly returns to the original placement height",
+	Default = false,
+	Flag = "YardLower",
+	Callback = function(enabled)
+		if enabled and (not state.layoutActive or state.layoutKind ~= "yard") then
+			YardLowerToggle:Set(false, true)
+			notify("Yard", "Build the yard first.")
+			return
+		end
+		state.yardLower = enabled
+		if enabled then
+			state.yardRise = false
+			if YardRiseToggle then YardRiseToggle:Set(false, true) end
+		end
+	end,
+})
+
+YardSection:AddButton({
+	Name = "RISE YARD SLOWLY",
+	Callback = function()
+		if state.layoutActive and state.layoutKind == "yard" then
+			state.yardRise = true
+			state.yardLower = false
+			YardRiseToggle:Set(true, true)
+			YardLowerToggle:Set(false, true)
+		else
+			notify("Yard", "Build the yard first.")
+		end
+	end,
+})
+
+YardSection:AddButton({
+	Name = "LOWER YARD SLOWLY",
+	Callback = function()
+		if state.layoutActive and state.layoutKind == "yard" then
+			state.yardRise = false
+			state.yardLower = true
+			YardRiseToggle:Set(false, true)
+			YardLowerToggle:Set(true, true)
+		else
+			notify("Yard", "Build the yard first.")
+		end
+	end,
+})
+
+YardSection:AddButton({
+	Name = "STOP VERTICAL YARD MOVEMENT",
+	Callback = function()
+		state.yardRise = false
+		state.yardLower = false
+		YardRiseToggle:Set(false, true)
+		YardLowerToggle:Set(false, true)
+	end,
+})
+
+YardSection:AddButton({
+	Name = "MOVE YARD FORWARD",
+	Callback = function() startYardDirection(Vector3.new(0, 0, -1), "Forward.") end,
+})
+
+YardSection:AddButton({
+	Name = "MOVE YARD BACKWARD",
+	Callback = function() startYardDirection(Vector3.new(0, 0, 1), "Backward.") end,
+})
+
+YardSection:AddButton({
+	Name = "MOVE YARD LEFT",
+	Callback = function() startYardDirection(Vector3.new(-1, 0, 0), "Left.") end,
+})
+
+YardSection:AddButton({
+	Name = "MOVE YARD RIGHT",
+	Callback = function() startYardDirection(Vector3.new(1, 0, 0), "Right.") end,
+})
+
+YardSection:AddButton({
+	Name = "STOP HORIZONTAL YARD MOVEMENT",
+	Callback = function()
+		state.yardButtonVector = Vector3.zero
+		state.yardButtonUntil = 0
+	end,
+})
+
+YardSection:AddSlider({
+	Name = "Yard Move Speed",
+	Min = 4,
+	Max = 30,
+	Default = 14,
+	Suffix = " studs/s",
+	Flag = "YardMoveSpeed",
+	Callback = function(value) state.yardMoveSpeed = value end,
+})
+
+YardSection:AddSlider({
+	Name = "Yard Vertical Speed",
+	Min = 2,
+	Max = 12,
+	Default = 6,
+	Suffix = " studs/s",
+	Flag = "YardVerticalSpeed",
+	Callback = function(value) state.yardVerticalSpeed = value end,
+})
+
+YardSection:AddSlider({
+	Name = "Yard Lift Height",
+	Min = 20,
+	Max = 180,
+	Default = 100,
+	Suffix = " studs",
+	Flag = "YardLiftHeight",
+	Callback = function(value) state.yardLiftHeight = value end,
+})
+
+YardSection:AddSlider({
+	Name = "Movement Smoothness",
+	Min = 2,
+	Max = 8,
+	Default = 4,
+	Suffix = "x",
+	Flag = "YardSmoothness",
+	Callback = function(value) state.yardSmoothness = value end,
+})
+
+YardSection:AddSlider({
+	Name = "Direction Button Distance",
+	Min = 4,
+	Max = 30,
+	Default = 12,
+	Suffix = " studs",
+	Flag = "YardNudgeDistance",
+	Callback = function(value) state.yardNudgeDistance = value end,
+})
+
+YardSection:AddButton({
+	Name = "STOP YARD / RELEASE",
+	Callback = function() stopLayout(true) end,
+})
+
+YardSection:AddParagraph({
+	Content = "The yard keeps a fixed set of owned debris so it cannot reshuffle under riders. Acceleration and deceleration are smoothed to reduce launching. Deck roots stay collidable; low fence roots form the perimeter. Server-owned pieces remain waiting.",
+	Height = 105,
+})
+
+local FlightSection = PlayerTab:CreateSection({
+	Title = "Fly",
+	Description = "client-controlled character flight",
+	Side = "Left",
+})
+
+local FlyToggle
+FlyToggle = FlightSection:AddToggle({
+	Name = "Fly",
+	Tag = FLY_KEYBIND.Name,
+	Keybind = FLY_KEYBIND,
+	Default = false,
+	Flag = "FlyEnabled",
+	Callback = function(enabled)
+		if enabled then
+			if not startFly(true) then
+				FlyToggle:Set(false, true)
+			end
+		else
+			stopFly(true)
+		end
+	end,
+})
+
+FlightSection:AddButton({
+	Name = "FORCE STOP FLY",
+	Callback = function()
+		FlyToggle:Set(false, true)
+		stopFly(true)
+	end,
+})
+
+FlightSection:AddSlider({
+	Name = "Fly Speed",
+	Min = 20,
+	Max = 120,
+	Default = 60,
+	Suffix = " studs/s",
+	Flag = "FlySpeed",
+	Callback = function(value)
+		state.flySpeed = value
+	end,
+})
+
+FlightSection:AddParagraph({
+	Content = "Controls: WASD to move, Space to rise, LeftCtrl to descend. Press F to toggle flight.",
+	Height = 62,
+})
+
+local GearSection = PlayerTab:CreateSection({
+	Title = "Inventory",
+	Description = "local character tools",
+	Side = "Right",
+})
+
+GearSection:AddButton({
+	Name = "GIVE / EQUIP BLUE HAMMER",
+	Description = "Adds the functional click-to-unanchor hammer and equips it.",
+	Callback = giveBlueHammer,
+})
+
+GearSection:AddButton({
+	Name = "REMOVE BLUE HAMMER",
+	Description = "Removes the locally created hammer.",
+	Callback = removeBlueHammer,
+})
+
+GearSection:AddParagraph({
+	Content = "Equip the hammer, aim at an anchored part under workspace.Structure, and click. It unanchors the connected assembly locally so Part Control can collect it. Server-owned map anchors may still be restored by the server.",
+	Height = 92,
+})
+
+local SurvivalSection = PlayerTab:CreateSection({
+	Title = "Survival",
+	Description = "character damage protection",
+	Side = "Right",
+})
+
+local NoDamageToggle
+NoDamageToggle = SurvivalSection:AddToggle({
+	Name = "No Damage",
+	Tag = "GOD",
+	Default = false,
+	Flag = "NoDamage",
+	Callback = function(enabled)
+		if enabled then
+			state.noDamage = true
+			if protectCharacterFromDamage(LocalPlayer.Character) then
+				notify("No Damage", "Protection enabled for the current character.")
+			else
+				notify("No Damage", "Enabled; protection will apply after your character spawns.")
+			end
+		else
+			stopNoDamage(true)
+		end
+	end,
+})
+
+SurvivalSection:AddParagraph({
+	Content = "Uses a one-billion-health guard before and after physics, blocks the local death state and touch damage, keeps joints intact, reapplies after respawn, and rescues you from the void. A server-forced character replacement can still override any client script.",
+	Height = 105,
+})
+
+local PlacementSection = SettingsTab:CreateSection({
+	Title = "Placement",
+	Description = "adjust where assemblies gather",
+	Side = "Left",
+})
+
+PlacementSection:AddSlider({
+	Name = "Vertical Offset",
+	Min = -25,
+	Max = 50,
+	Default = 8,
+	Suffix = " studs",
+	Flag = "VerticalOffset",
+	Callback = function(value)
+		state.verticalOffset = value
+	end,
+})
+
+PlacementSection:AddSlider({
+	Name = "Target Spin Radius",
+	Min = 2,
+	Max = 10,
+	Default = 3,
+	Suffix = " studs",
+	Flag = "TargetSpinRadius",
+	Callback = function(value)
+		state.bringRadius = value
+	end,
+})
+
+PlacementSection:AddSlider({
+	Name = "Target Spin Speed",
+	Min = 5,
+	Max = 30,
+	Default = 15,
+	Suffix = "x",
+	Flag = "TargetSpinSpeed",
+	Callback = function(value)
+		state.bringSpinSpeed = value
+	end,
+})
+
+PlacementSection:AddSlider({
+	Name = "Orbit Radius",
+	Min = 8,
+	Max = 50,
+	Default = 18,
+	Suffix = " studs",
+	Flag = "OrbitRadius",
+	Callback = function(value)
+		state.orbitRadius = value
+	end,
+})
+
+PlacementSection:AddSlider({
+	Name = "Orbit Speed",
+	Min = 1,
+	Max = 10,
+	Default = 2,
+	Suffix = "x",
+	Flag = "OrbitSpeed",
+	Callback = function(value)
+		state.orbitSpeed = value
+	end,
+})
+
+PlacementSection:AddButton({
+	Name = "Target Yourself",
+	Callback = function()
+		TargetField:Set(playerOption(LocalPlayer))
+		state.targetText = LocalPlayer.Name
+		resolveTarget(true)
+	end,
+})
+
+local SafetySection = SettingsTab:CreateSection({
+	Title = "Safety",
+	Description = "protect your character from physics flings",
+	Side = "Right",
+})
+
+SafetySection:AddToggle({
+	Name = "Anti Fling",
+	Tag = "AF",
+	Default = true,
+	Flag = "AntiFling",
+	Callback = function(enabled)
+		state.antiFling = enabled
+		if not enabled then
+			restoreAntiFlingCollision()
+			state.safeCFrame = nil
+		end
+		notify("Anti Fling", enabled and "Enabled" or "Disabled")
+	end,
+})
+
+local InfoSection = SettingsTab:CreateSection({
+	Title = "Information",
+	Side = "Right",
+})
+
+InfoSection:AddParagraph({
+	Content = "Detached unanchored assemblies inside workspace.Structure can move. Intact houses remain welded to the server-owned anchored island until disaster damage separates them. Local anchoring may be corrected by the server.",
+	Height = 90,
+})
+
+InfoSection:AddParagraph({
+	Content = "Press LeftAlt to close or reopen Clear.",
+	Height = 44,
+})
+
+local rejoinPending = false
+InfoSection:AddButton({
+	Name = "REJOIN SERVER",
+	Description = "Reconnect to this NDS server; falls back to another server if necessary.",
+	Callback = function()
+		if rejoinPending then
+			notify("Rejoin", "A rejoin request is already running.")
+			return
+		end
+		rejoinPending = true
+		stopAllPartModes(false)
+		stopFly(false)
+		notify("Rejoin", "Reconnecting to the current server...")
+		task.spawn(function()
+			task.wait(0.35)
+			local sameServer = pcall(function()
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+			end)
+			if not sameServer then
+				pcall(function()
+					TeleportService:Teleport(game.PlaceId, LocalPlayer)
+				end)
+			end
+			task.wait(6)
+			if LocalPlayer.Parent then
+				rejoinPending = false
+				notify("Rejoin", "Teleport did not start. Press the button to try again.")
+			end
+		end)
+	end,
+})
+
+InfoSection:AddButton({
+	Name = "Destroy Interface",
+	Callback = function()
+		Window:Destroy()
+	end,
+})
+
+local function refreshPlayerDropdowns()
+	local targetOptions = getPlayerOptions(false)
+	TargetField:Refresh(targetOptions, true)
+	if not resolvePlayer(usernameFromOption(TargetField:Get())) then
+		TargetField:Set(playerOption(LocalPlayer), true)
+		state.targetText = LocalPlayer.Name
+	end
+	local seatOptions = getPlayerOptions(true)
+	SeatPlayerDropdown:Refresh(seatOptions, true)
+	if #seatOptions > 0 and not resolvePlayer(usernameFromOption(SeatPlayerDropdown:Get())) then
+		SeatPlayerDropdown:Set(seatOptions[1], true)
+	end
+end
+
+Window:_Connect(UserInputService.InputBegan, function(input, gameProcessed)
+	if gameProcessed or UserInputService:GetFocusedTextBox() then
+		return
+	end
+	if input.KeyCode == FLY_KEYBIND then
+		FlyToggle:Set(not FlyToggle:Get())
+		return
+	end
+	if state.placingMode then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			state.placementDragging = true
+			updatePlacementFromMouse()
+		elseif input.KeyCode == Enum.KeyCode.E then
+			state.placementHeight = state.placementHeight + 5
+			updatePlacementFromMouse()
+		elseif input.KeyCode == Enum.KeyCode.Q then
+			state.placementHeight = state.placementHeight - 5
+			updatePlacementFromMouse()
+		end
+		return
+	end
+	if state.meteorActive and input.UserInputType == Enum.UserInputType.MouseButton1 then
+		local now = os.clock()
+		if now - state.meteorLastClick <= 0.32 then
+			state.meteorLastClick = 0
+			throwMeteor()
+		else
+			state.meteorLastClick = now
+		end
+	end
+end)
+
+Window:_Connect(UserInputService.InputChanged, function(input)
+	if not state.placingMode then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseMovement and state.placementDragging then
+		updatePlacementFromMouse()
+	elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+		state.placementHeight = state.placementHeight + input.Position.Z * 4
+		updatePlacementFromMouse()
+	end
+end)
+
+Window:_Connect(UserInputService.InputEnded, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		state.placementDragging = false
+	end
+end)
+
+Window:_Connect(Players.PlayerRemoving, function(player)
+	if state.target == player then
+		state.target = nil
+		state.bringing = false
+		BringToggle:Set(false, true)
+		TargetStatus:Set("Target left the server", true)
+	end
+	if selectedSeatPlayer() == player then
+		state.seatTeleportBusy = false
+		updateSeatStatus("Selected player left the server.")
+	end
+	task.defer(refreshPlayerDropdowns)
+end)
+
+Window:_Connect(Players.PlayerAdded, function()
+	task.defer(refreshPlayerDropdowns)
+end)
+
+Window:_Connect(RunService.PreSimulation, function()
+	if state.noDamage then
+		updateNoDamage(0)
+	end
+	if state.flyEnabled and LocalPlayer.Character then
+		updateFlyPose(LocalPlayer.Character)
+	end
+end)
+
+Window:_Connect(RunService.Heartbeat, function(deltaTime)
+	local now = os.clock()
+	updateNoDamage(deltaTime)
+	if state.seatDetectionEnabled then
+		state.seatScanAccumulator = state.seatScanAccumulator + deltaTime
+		if state.seatScanAccumulator >= 0.5 then
+			state.seatScanAccumulator = 0
+			scanUnanchoredSeats()
+		end
+	end
+	if now - state.lastScan >= 0.5 then
+		state.lastScan = now
+		local partCount, rootCount = scanAssemblies()
+		if state.layoutActive and state.layoutBase then
+			for index, root in ipairs(state.roots) do
+				if state.layoutCFrames[root] == nil then
+					state.layoutCFrames[root] = layoutCFrame(state.layoutKind, state.layoutBase, index, math.max(rootCount, 1))
+				end
+			end
+		end
+		if now - state.lastStatusUpdate >= 0.5 then
+			state.lastStatusUpdate = now
+			updateStatus(partCount, rootCount)
+		end
+	end
+
+	if (state.bringing or state.orbiting or state.layoutActive or state.meteorActive or state.freezing or state.seatDetectionEnabled)
+		and now - state.lastRadiusUpdate >= 1 then
+		state.lastRadiusUpdate = now
+		if state.seatDetectionEnabled then
+			expandSeatSimulationRadius()
+		else
+			expandSimulationRadius()
+		end
+	end
+
+	if state.bringing then
+		local target = state.target
+		local targetTorso = getTargetTorso(target)
+		if not targetTorso then
+			state.bringing = false
+			BringToggle:Set(false, true)
+			TargetStatus:Set("Target unavailable", true)
+			return
+		end
+
+		local moved = 0
+		local unowned = 0
+		local elapsed = os.clock() - state.bringStartTime
+		local spinActive = elapsed >= state.bringDelay
+		if spinActive then
+			state.bringSpinAngle = state.bringSpinAngle + deltaTime * state.bringSpinSpeed
+		end
+		local count = math.max(#state.roots, 1)
+		for index, root in ipairs(state.roots) do
+			if root.Parent then
+				if isOwned(root) then
+					if spinActive then
+						if root.Anchored then
+							root.Anchored = false
+						end
+						local angle = state.bringSpinAngle + ((index - 1) / count) * math.pi * 2
+						local layer = (index - 1) % 7 - 3
+						local radius = state.bringRadius + math.floor((index - 1) / 70) * 0.6
+						local position = targetTorso.Position + Vector3.new(
+							math.cos(angle) * radius,
+							layer * 0.45,
+							math.sin(angle) * radius
+						)
+						local desired = CFrame.new(position) * CFrame.Angles(
+							state.bringSpinAngle * 2,
+							-angle,
+							state.bringSpinAngle * 3
+						)
+						driveRoot(root, desired)
+						moved = moved + 1
+					end
+				else
+					unowned = unowned + 1
+				end
+			end
+		end
+		state.moved = moved
+		state.unowned = unowned
+	elseif state.orbiting then
+		local localRoot = getRootPart(LocalPlayer)
+		if not localRoot then
+			state.orbiting = false
+			OrbitToggle:Set(false, true)
+		else
+			state.orbitAngle = state.orbitAngle + deltaTime * state.orbitSpeed
+			local moved = 0
+			local unowned = 0
+			local count = math.max(#state.roots, 1)
+			for index, root in ipairs(state.roots) do
+				if root.Parent then
+					if root.Anchored then
+						root.Anchored = false
+					end
+					if isOwned(root) then
+						local angle = state.orbitAngle + ((index - 1) / count) * math.pi * 2
+						local layer = (index - 1) % 4
+						local radius = state.orbitRadius + math.floor((index - 1) / 32) * 3
+						local worldPosition = localRoot.Position + Vector3.new(
+							math.cos(angle) * radius,
+							state.verticalOffset + layer * 2.5,
+							math.sin(angle) * radius
+						)
+						local desired = CFrame.new(worldPosition) * CFrame.Angles(0, -angle, 0)
+						driveRoot(root, desired)
+						moved = moved + 1
+					else
+						unowned = unowned + 1
+					end
+				end
+			end
+			state.moved = moved
+			state.unowned = unowned
+		end
+	elseif state.layoutActive then
+		updateLayout(deltaTime)
+	elseif state.meteorActive then
+		updateMeteor(deltaTime, now)
+	elseif state.freezing then
+		for root, frozenCFrame in pairs(state.frozenCFrames) do
+			if root.Parent and isOwned(root) then
+				root.CFrame = frozenCFrame
+				zeroMotion(root)
+			end
+		end
+	end
+
+	updateFly()
+
+	if state.antiFling then
+		applyAntiFling(now)
+	end
+end)
+
+local originalDestroy = Window.Destroy
+function Window:Destroy()
+	if self.Destroyed then
+		return
+	end
+	state.bringing = false
+	state.orbiting = false
+	stopPlacement(false)
+	stopMeteor(false)
+	stopLayout(false)
+	for root in pairs(state.frozenCFrames) do
+		if root.Parent then
+			root.Anchored = false
+			pcall(zeroMotion, root)
+		end
+	end
+	table.clear(state.frozenCFrames)
+	state.freezing = false
+	stopFly(false)
+	stopNoDamage(false)
+	state.seatDetectionEnabled = false
+	state.seatTeleportBusy = false
+	table.clear(state.unanchoredSeats)
+	restorePartCollision()
+	restoreLayoutCollision()
+	restoreAntiFlingCollision()
+	restoreSimulationRadius()
+	if GlobalEnvironment.__ZenthraNDSPartControlSession == sessionToken then
+		GlobalEnvironment.__ZenthraNDSPartControlSession = nil
+		GlobalEnvironment.__ZenthraNDSPartControlCleanup = nil
+		GlobalEnvironment.__ZenthraNDSStopOrbit = nil
+		GlobalEnvironment.__ZenthraNDSStopFly = nil
+		GlobalEnvironment.__ZenthraNDSStopAll = nil
+		GlobalEnvironment.__ZenthraNDSElevatorState = nil
+		GlobalEnvironment.__ZenthraNDSYardState = nil
+	end
+	originalDestroy(self)
+end
+
+GlobalEnvironment.__ZenthraNDSPartControlCleanup = function()
+	if GlobalEnvironment.__ZenthraNDSPartControlSession == sessionToken and not Window.Destroyed then
+		Window:Destroy()
+	end
+end
+
+GlobalEnvironment.__ZenthraNDSStopOrbit = function()
+	if GlobalEnvironment.__ZenthraNDSPartControlSession == sessionToken and not Window.Destroyed then
+		OrbitToggle:Set(false, true)
+		stopOrbiting(true)
+	end
+end
+
+GlobalEnvironment.__ZenthraNDSStopFly = function()
+	if GlobalEnvironment.__ZenthraNDSPartControlSession == sessionToken and not Window.Destroyed then
+		FlyToggle:Set(false, true)
+		stopFly(true)
+	end
+end
+
+GlobalEnvironment.__ZenthraNDSStopAll = function()
+	if GlobalEnvironment.__ZenthraNDSPartControlSession == sessionToken and not Window.Destroyed then
+		stopAllPartModes(true)
+	end
+end
+
+GlobalEnvironment.__ZenthraNDSElevatorState = function()
+	if GlobalEnvironment.__ZenthraNDSPartControlSession ~= sessionToken or Window.Destroyed then
+		return false, nil, 0, false, 0, 0
+	end
+	return state.layoutActive, state.layoutKind, state.elevatorCurrentY, state.elevatorRaised, state.moved, state.unowned
+end
+
+GlobalEnvironment.__ZenthraNDSYardState = function()
+	if GlobalEnvironment.__ZenthraNDSPartControlSession ~= sessionToken or Window.Destroyed then
+		return false, nil, nil, Vector3.zero, false, false, false, 0, 0, 0, 0
+	end
+	local fenceCount = 0
+	for _ in pairs(state.yardFenceRoots) do fenceCount = fenceCount + 1 end
+	return state.layoutActive, state.layoutKind, state.yardCFrame, state.yardVelocity,
+		state.yardDriveEnabled, state.yardRise, state.yardLower, state.moved, state.unowned,
+		#state.yardRoots, fenceCount
+end
+
+PartsTab:Select()
+resolveTarget(false)
+local initialParts, initialRoots = scanAssemblies()
+updateStatus(initialParts, initialRoots)
+notify("NDS Part Control", "Loaded. Enter a player, then enable Bring All Parts.")
